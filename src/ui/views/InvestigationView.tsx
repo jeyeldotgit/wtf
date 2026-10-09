@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { Spinner } from '@inkjs/ui';
 import {
   Header,
@@ -11,59 +11,48 @@ import {
   QuestionModal,
 } from '../components/index.js';
 import { InvestigationData, UIState } from '../types/index.js';
+import { testScenarios } from '../test-scenarios.js';
 
 export interface InvestigationViewProps {
-  initialData?: InvestigationData;
+  initialScenarioIndex?: number;
   onExit?: () => void;
 }
 
 export const InvestigationView: React.FC<InvestigationViewProps> = ({
-  initialData,
+  initialScenarioIndex = 0,
   onExit,
 }) => {
-  const [data, setData] = useState<InvestigationData>(
-    initialData || {
-      state: 'diagnosis_ready',
-      failure: {
-        command: 'pnpm run build',
-        exitCode: 1,
-        timestamp: new Date().toISOString(),
-        cwd: '/home/jeyel/Documents/wtf',
-        errorSummary: "TypeScript error TS2322: Type 'string' is not assignable to type 'number'.",
-        rawLogLines: [
-          "src/handlers/calc.ts:14:5 - error TS2322: Type 'string' is not assignable to type 'number'.",
-          "14     const total: number = req.body.amount;",
-          "                             ~~~~~~~~~~~~~~~~",
-          "Found 1 error in src/handlers/calc.ts:14",
-        ],
-      },
-      fix: {
-        filePath: 'src/handlers/calc.ts',
-        description: 'Parse string input from request body to integer using Number(req.body.amount)',
-        conceptExplanation: [
-          'HTTP request bodies parsed from JSON or URL queries often arrive as strings.',
-          'TypeScript catches type mismatches at compile time to prevent runtime NaN and calculation errors.',
-        ],
-        whyFixWorks: 'Explicitly parses req.body.amount with Number(...) before assigning to the number type.',
-        confidence: 'high',
-        diff: `--- a/src/handlers/calc.ts
-+++ b/src/handlers/calc.ts
-@@ -11,7 +11,7 @@
- export function handleCalculation(req: Request) {
--    const total: number = req.body.amount;
-+    const total: number = Number(req.body.amount);
-     return { total };
- }`,
-      },
-      verification: {
-        command: 'pnpm run build',
-        description: 'Run TypeScript compiler build to verify type check succeeds.',
-      },
-    }
-  );
-
+  const [activeScenarioIdx, setActiveScenarioIdx] = useState<number>(initialScenarioIndex);
+  const [data, setData] = useState<InvestigationData>(testScenarios[initialScenarioIndex].data);
   const [verificationOutput, setVerificationOutput] = useState<string[]>([]);
   const [userQuestionResponse, setUserQuestionResponse] = useState<string | null>(null);
+
+  const isInteractive = Boolean(process.stdin.isTTY);
+
+  // Allow switching test scenarios using keys 1-9, 0 (for 10), or left/right arrow keys
+  // Only active when not currently typing in QuestionModal
+  useInput(
+    (input, key) => {
+      let targetIdx: number | null = null;
+      if (input >= '1' && input <= '9') {
+        targetIdx = parseInt(input, 10) - 1;
+      } else if (input === '0' && testScenarios.length >= 10) {
+        targetIdx = 9; // '0' key selects scenario 10
+      } else if (key.rightArrow || key.downArrow) {
+        targetIdx = (activeScenarioIdx + 1) % testScenarios.length;
+      } else if (key.leftArrow || key.upArrow) {
+        targetIdx = (activeScenarioIdx - 1 + testScenarios.length) % testScenarios.length;
+      }
+
+      if (targetIdx !== null && targetIdx >= 0 && targetIdx < testScenarios.length) {
+        setActiveScenarioIdx(targetIdx);
+        setData(testScenarios[targetIdx].data);
+        setVerificationOutput([]);
+        setUserQuestionResponse(null);
+      }
+    },
+    { isActive: isInteractive && data.state !== 'asking_question' }
+  );
 
   const handleApprovePatch = () => {
     setData((prev) => ({
@@ -87,15 +76,14 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
 
     setTimeout(() => {
       setVerificationOutput([
-        '> wtf-local@0.1.0 build',
-        '> tsc -p tsconfig.json',
-        '✔ Compilation finished without errors.',
+        `> Running verification: ${data.verification?.command || 'test'}`,
+        '✔ Verification passed! All checks succeeded.',
       ]);
       setData((prev) => ({
         ...prev,
         state: 'verified_success',
       }));
-    }, 1500);
+    }, 1200);
   };
 
   const handleSkipVerification = () => {
@@ -111,7 +99,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
 
   const handleSubmitQuestion = (q: string) => {
     setUserQuestionResponse(
-      `Q: "${q}"\nWTF Answer: Since JSON request payloads can deserialize numbers or strings depending on client headers, TypeScript enforces that your variable matches strictly. Using Number() guarantees runtime safety.`
+      `Q: "${q}"\nWTF Answer: This error occurred because of type mismatch or missing definitions. The proposed patch safely handles the edge case.`
     );
     setData((prev) => ({
       ...prev,
@@ -127,11 +115,40 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
   };
 
   const handleReset = () => {
-    if (onExit) onExit();
+    // Reset current scenario back to initial diagnosis
+    setData(testScenarios[activeScenarioIdx].data);
+    setVerificationOutput([]);
+    setUserQuestionResponse(null);
   };
 
   return (
     <Box flexDirection="column" padding={1}>
+      {/* Test Scenario Switcher Toolbar */}
+      <Box
+        flexDirection="column"
+        borderStyle="single"
+        borderColor="gray"
+        paddingX={1}
+        marginBottom={1}
+      >
+        <Box justifyContent="space-between">
+          <Text bold color="cyan">🧪 TEST SCENARIOS (Press 1-9, 0 or ← / → arrows):</Text>
+          <Text color="yellow">Active: [{activeScenarioIdx + 1}/10] {testScenarios[activeScenarioIdx].title}</Text>
+        </Box>
+        <Box flexWrap="wrap" marginTop={1}>
+          {testScenarios.map((sc, idx) => (
+            <Box key={sc.id} marginRight={1}>
+              <Text
+                bold={idx === activeScenarioIdx}
+                color={idx === activeScenarioIdx ? 'yellow' : 'gray'}
+              >
+                [{idx === 9 ? '0' : idx + 1}] {sc.id}
+              </Text>
+            </Box>
+          ))}
+        </Box>
+      </Box>
+
       <Header state={data.state} />
 
       <ErrorEvidence failure={data.failure} />
