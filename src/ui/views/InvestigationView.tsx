@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { Spinner } from '@inkjs/ui';
 import {
   Header,
@@ -11,59 +11,38 @@ import {
   QuestionModal,
 } from '../components/index.js';
 import { InvestigationData, UIState } from '../types/index.js';
+import { testScenarios } from '../test-scenarios.js';
 
 export interface InvestigationViewProps {
-  initialData?: InvestigationData;
+  initialScenarioIndex?: number;
   onExit?: () => void;
 }
 
 export const InvestigationView: React.FC<InvestigationViewProps> = ({
-  initialData,
+  initialScenarioIndex = 0,
   onExit,
 }) => {
-  const [data, setData] = useState<InvestigationData>(
-    initialData || {
-      state: 'diagnosis_ready',
-      failure: {
-        command: 'pnpm run build',
-        exitCode: 1,
-        timestamp: new Date().toISOString(),
-        cwd: '/home/jeyel/Documents/wtf',
-        errorSummary: "TypeScript error TS2322: Type 'string' is not assignable to type 'number'.",
-        rawLogLines: [
-          "src/handlers/calc.ts:14:5 - error TS2322: Type 'string' is not assignable to type 'number'.",
-          "14     const total: number = req.body.amount;",
-          "                             ~~~~~~~~~~~~~~~~",
-          "Found 1 error in src/handlers/calc.ts:14",
-        ],
-      },
-      fix: {
-        filePath: 'src/handlers/calc.ts',
-        description: 'Parse string input from request body to integer using Number(req.body.amount)',
-        conceptExplanation: [
-          'HTTP request bodies parsed from JSON or URL queries often arrive as strings.',
-          'TypeScript catches type mismatches at compile time to prevent runtime NaN and calculation errors.',
-        ],
-        whyFixWorks: 'Explicitly parses req.body.amount with Number(...) before assigning to the number type.',
-        confidence: 'high',
-        diff: `--- a/src/handlers/calc.ts
-+++ b/src/handlers/calc.ts
-@@ -11,7 +11,7 @@
- export function handleCalculation(req: Request) {
--    const total: number = req.body.amount;
-+    const total: number = Number(req.body.amount);
-     return { total };
- }`,
-      },
-      verification: {
-        command: 'pnpm run build',
-        description: 'Run TypeScript compiler build to verify type check succeeds.',
-      },
-    }
-  );
-
+  const [activeScenarioIdx, setActiveScenarioIdx] = useState<number>(initialScenarioIndex);
+  const [data, setData] = useState<InvestigationData>(testScenarios[initialScenarioIndex].data);
   const [verificationOutput, setVerificationOutput] = useState<string[]>([]);
   const [userQuestionResponse, setUserQuestionResponse] = useState<string | null>(null);
+
+  const isInteractive = Boolean(process.stdin.isTTY);
+
+  // Allow switching test scenarios using keys 1, 2, 3
+  useInput(
+    (input) => {
+      const num = parseInt(input, 10);
+      if (num >= 1 && num <= testScenarios.length) {
+        const nextIdx = num - 1;
+        setActiveScenarioIdx(nextIdx);
+        setData(testScenarios[nextIdx].data);
+        setVerificationOutput([]);
+        setUserQuestionResponse(null);
+      }
+    },
+    { isActive: isInteractive }
+  );
 
   const handleApprovePatch = () => {
     setData((prev) => ({
@@ -87,15 +66,14 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
 
     setTimeout(() => {
       setVerificationOutput([
-        '> wtf-local@0.1.0 build',
-        '> tsc -p tsconfig.json',
-        '✔ Compilation finished without errors.',
+        `> Running verification: ${data.verification?.command || 'test'}`,
+        '✔ Verification passed! All checks succeeded.',
       ]);
       setData((prev) => ({
         ...prev,
         state: 'verified_success',
       }));
-    }, 1500);
+    }, 1200);
   };
 
   const handleSkipVerification = () => {
@@ -111,7 +89,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
 
   const handleSubmitQuestion = (q: string) => {
     setUserQuestionResponse(
-      `Q: "${q}"\nWTF Answer: Since JSON request payloads can deserialize numbers or strings depending on client headers, TypeScript enforces that your variable matches strictly. Using Number() guarantees runtime safety.`
+      `Q: "${q}"\nWTF Answer: This error occurred because of type mismatch or missing definitions. The proposed patch safely handles the edge case.`
     );
     setData((prev) => ({
       ...prev,
@@ -127,11 +105,37 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
   };
 
   const handleReset = () => {
-    if (onExit) onExit();
+    // Reset current scenario back to initial diagnosis
+    setData(testScenarios[activeScenarioIdx].data);
+    setVerificationOutput([]);
+    setUserQuestionResponse(null);
   };
 
   return (
     <Box flexDirection="column" padding={1}>
+      {/* Test Scenario Switcher Toolbar */}
+      <Box
+        justifyContent="space-between"
+        borderStyle="single"
+        borderColor="gray"
+        paddingX={1}
+        marginBottom={1}
+      >
+        <Text bold color="cyan">🧪 TEST SCENARIOS (Press 1, 2, or 3 to switch):</Text>
+        <Box>
+          {testScenarios.map((sc, idx) => (
+            <Box key={sc.id} marginLeft={1}>
+              <Text
+                bold={idx === activeScenarioIdx}
+                color={idx === activeScenarioIdx ? 'yellow' : 'gray'}
+              >
+                [{idx + 1}] {sc.id}
+              </Text>
+            </Box>
+          ))}
+        </Box>
+      </Box>
+
       <Header state={data.state} />
 
       <ErrorEvidence failure={data.failure} />
