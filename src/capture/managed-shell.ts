@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import type { Readable } from 'node:stream';
 import type { CapturedRun } from './types.js';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { constants } from 'node:os';
 
 type OutputStream = 'stdout' | 'stderr';
 type OutputHandler = (stream: OutputStream, chunk: Buffer, runId?: string) => void;
@@ -28,6 +31,11 @@ type ActiveRun = {
   cwdAfter: string | null;
   resolve: (run: CapturedRun) => void;
   reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
+  maxOutputBytes: number;
+  outputBytes: number;
+  limited: boolean;
+  cancelled: boolean;
 };
 
 export interface ManagedShellOptions {
@@ -36,7 +44,7 @@ export interface ManagedShellOptions {
   env?: NodeJS.ProcessEnv;
   onOutput?: OutputHandler;
   onCommandStart?: (runId: string, commandText: string, startTime: number, cwd: string) => void;
-  onExit?: (code: number | null, signal: string | null) => void;
+  onExit?: (code: number | null, signal: string | null, limited?: boolean) => void;
 }
 
 const CONTROL_PREFIX = Buffer.from('\x1eWTF_CONTROL\0');
@@ -52,12 +60,21 @@ export class ManagedShell {
   private control: Readable | undefined;
   private active: ActiveRun | undefined;
   private ended = false;
+  private restartable = false;
 
   constructor(options?: ManagedShellOptions) {
     // Resolve shell: options.shell > $SHELL env var > '/bin/sh' fallback
-    this.shellPath = options?.shell ?? process.env.SHELL ?? '/bin/sh';
+    const requestedShell = options?.shell ?? (process.platform === 'win32' ? '/bin/sh' : process.env.SHELL ?? '/bin/sh');
+    this.shellPath = process.platform === 'win32' && requestedShell === '/bin/sh' && !existsSync(requestedShell)
+      ? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'usr', 'bin', 'sh.exe') : requestedShell;
     this.currentCwd = options?.cwd ?? process.cwd();
     this.env = { ...process.env, ...options?.env };
+    if (process.platform === 'win32') {
+      const pathKeys = Object.keys(this.env).filter(key => key.toLowerCase() === 'path');
+      const inheritedPath = pathKeys.map(key => this.env[key]).filter(Boolean).join(';');
+      for (const key of pathKeys) delete this.env[key];
+      this.env.PATH = `${dirname(this.shellPath)};${inheritedPath}`;
+    }
     this.onOutput = options?.onOutput ?? ((stream, chunk) => {
       (stream === 'stdout' ? process.stdout : process.stderr).write(chunk);
     });
@@ -69,7 +86,9 @@ export class ManagedShell {
    * Execute a command and return a fully populated CapturedRun.
    * Streams output live to the user's terminal while capturing separately.
    */
-  async execute(commandText: string): Promise<CapturedRun> {
+  get cwd(): string { return this.currentCwd; }
+
+  async execute(commandText: string, limits: { timeoutMs?: number; maxOutputBytes?: number } = {}): Promise<CapturedRun> {
     if (this.active) throw new Error('A managed-shell command is already running');
     if (commandText.includes('\0')) throw new Error('Commands cannot contain null bytes');
     const child = this.ensureStarted();
@@ -94,8 +113,13 @@ export class ManagedShell {
         cwdAfter: null,
         resolve,
         reject,
+        maxOutputBytes: limits.maxOutputBytes ?? Infinity,
+        outputBytes: 0,
+        limited: false,
+        cancelled: false,
       };
       this.active = active;
+      if (limits.timeoutMs) active.timer = setTimeout(() => this.stopLimited(active), limits.timeoutMs);
       this.onCommandStart?.(runId, commandText, startTime, active.cwd);
       const script = this.commandScript(commandText, token);
       child.stdin!.write(script, (error) => {
@@ -107,7 +131,8 @@ export class ManagedShell {
   destroy(): void {
     const child = this.child;
     if (!child) return;
-    child.stdin?.end();
+    if (this.active && !this.active.limited) this.active.cancelled = true;
+    if (process.platform !== 'win32') child.stdin?.end();
     if (process.platform !== 'win32' && child.pid !== undefined) {
       try {
         process.kill(-child.pid, 'SIGTERM');
@@ -117,10 +142,31 @@ export class ManagedShell {
         return;
       }
     }
-    child.kill('SIGTERM');
+    if (process.platform === 'win32' && child.pid) {
+      const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      killer.on('error', () => child.kill('SIGTERM'));
+      killer.on('close', code => { if (code !== 0) child.kill('SIGTERM'); });
+      const active = this.active;
+      const shutdown = setTimeout(() => {
+        if (this.child !== child) return;
+        child.kill('SIGKILL');
+        child.stdin?.destroy();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        this.control?.destroy();
+        this.child = undefined;
+        this.control = undefined;
+        this.ended = true;
+        if (active && this.active === active) this.finishActive(active, null, 'SIGTERM');
+        this.onExit?.(null, 'SIGTERM', active?.limited ?? false);
+      }, 750);
+      child.once('close', () => clearTimeout(shutdown));
+      shutdown.unref();
+    } else child.kill('SIGTERM');
   }
 
   private ensureStarted(): ChildProcess {
+    if (this.ended && this.restartable) { this.ended = false; this.restartable = false; }
     if (this.ended) throw new Error('The managed-shell session has ended');
     if (this.child) return this.child;
 
@@ -129,6 +175,7 @@ export class ManagedShell {
       detached: process.platform !== 'win32',
       env: this.env,
       cwd: this.currentCwd,
+      windowsHide: true,
     });
     const control = child.stdio[3] as Readable | null;
     if (!child.stdin || !child.stdout || !child.stderr || !control) {
@@ -138,13 +185,14 @@ export class ManagedShell {
 
     this.child = child;
     this.control = control;
-    child.stdout.on('data', (chunk: Buffer) => this.consumeOutput('stdout', chunk));
-    child.stderr.on('data', (chunk: Buffer) => this.consumeOutput('stderr', chunk));
-    control.on('data', (chunk: Buffer) => this.consumeControl(chunk));
-    child.stdout.on('end', () => this.endStream('stdout'));
-    child.stderr.on('end', () => this.endStream('stderr'));
-    child.on('error', (error) => this.failActive(error));
-    child.on('close', (code, signal) => this.handleClose(code, signal));
+    child.stdout.on('data', (chunk: Buffer) => { if (this.child === child) this.consumeOutput('stdout', chunk); });
+    child.stderr.on('data', (chunk: Buffer) => { if (this.child === child) this.consumeOutput('stderr', chunk); });
+    control.on('data', (chunk: Buffer) => { if (this.child === child) this.consumeControl(chunk); });
+    child.stdout.on('end', () => { if (this.child === child) this.endStream('stdout'); });
+    child.stderr.on('end', () => { if (this.child === child) this.endStream('stderr'); });
+    child.stdin.on('error', () => {}); // write callbacks report errors to the pending command
+    child.on('error', (error) => { if (this.child === child) this.failActive(error); });
+    child.on('close', (code, signal) => { if (this.child === child) this.handleClose(code, signal); });
     return child;
   }
 
@@ -158,7 +206,9 @@ export class ManagedShell {
       'fi',
       `printf '\\036WTF_STDOUT_${token}\\037'`,
       `printf '\\036WTF_STDERR_${token}\\037' >&2`,
-      `printf '\\036WTF_CONTROL\\0%s\\0%s\\0%s\\0' '${token}' "$${statusVariable}" "$PWD" >&3`,
+      // Windows does not inherit Node's extra pipe as POSIX descriptor 3.
+      // After the stderr end marker, its remaining bytes are the private control frame.
+      `printf '\\036WTF_CONTROL\\0%s\\0%s\\0%s\\0' '${token}' "$${statusVariable}" ${process.platform === 'win32' ? '"$(cygpath -aw "$PWD")"' : '"$PWD"'} >&${process.platform === 'win32' ? '2' : '3'}`,
       '',
     ].join('\n');
   }
@@ -171,7 +221,8 @@ export class ManagedShell {
     }
     const state = active[stream];
     if (state.ended) {
-      this.onOutput(stream, chunk, active.runId);
+      if (process.platform === 'win32' && stream === 'stderr') this.consumeControl(chunk);
+      else this.onOutput(stream, chunk, active.runId);
       return;
     }
 
@@ -182,7 +233,10 @@ export class ManagedShell {
       state.pending = Buffer.alloc(0);
       state.ended = true;
       const trailing = combined.subarray(markerIndex + state.marker.length);
-      if (trailing.length > 0) this.onOutput(stream, trailing, active.runId);
+      if (trailing.length > 0) {
+        if (process.platform === 'win32' && stream === 'stderr') this.consumeControl(trailing);
+        else this.onOutput(stream, trailing, active.runId);
+      }
     } else {
       const safeLength = Math.max(0, combined.length - state.marker.length + 1);
       if (safeLength > 0) this.capture(active, stream, combined.subarray(0, safeLength));
@@ -226,8 +280,9 @@ export class ManagedShell {
       if (token !== active.token) continue;
       const status = Number(statusText);
       active.exitStatus = Number.isInteger(status) && status >= 0 && status <= 255 ? status : null;
-      active.cwdAfter = cwd;
-      if (cwd) this.currentCwd = cwd;
+      const nativeCwd = process.platform === 'win32' ? cwd.replace(/^\/([a-z])\//i, (_, drive: string) => `${drive.toUpperCase()}:/`).replaceAll('/', '\\') : cwd;
+      active.cwdAfter = nativeCwd;
+      if (nativeCwd) this.currentCwd = nativeCwd;
       active.controlComplete = true;
       this.completeIfReady(active);
       return;
@@ -236,8 +291,50 @@ export class ManagedShell {
 
   private capture(active: ActiveRun, stream: OutputStream, chunk: Buffer): void {
     if (chunk.length === 0) return;
-    active[stream].chunks.push(Buffer.from(chunk));
-    this.onOutput(stream, chunk, active.runId);
+    const retained = chunk.subarray(0, Math.max(0, active.maxOutputBytes - active.outputBytes));
+    active.outputBytes += retained.length;
+    if (retained.length) {
+      active[stream].chunks.push(Buffer.from(retained));
+      this.onOutput(stream, retained, active.runId);
+    }
+    if (retained.length < chunk.length && !active.limited) this.stopLimited(active);
+  }
+
+  async close(): Promise<void> {
+    const child = this.child;
+    if (!child) return;
+    await new Promise<void>(resolve => {
+      child.once('close', () => { clearTimeout(force); resolve(); });
+      const force = setTimeout(() => {
+        child.kill('SIGKILL');
+        child.stdin?.destroy();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        this.control?.destroy();
+      }, 1500);
+      this.destroy();
+    });
+  }
+
+  private stopLimited(active: ActiveRun): void {
+    if (this.active !== active || active.limited) return;
+    active.limited = true;
+    this.restartable = true;
+    this.destroy();
+    // A child ignoring SIGTERM must not hold the approval promise open.
+    const child = this.child;
+    const force = setTimeout(() => {
+      if (process.platform !== 'win32' && child?.pid) {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+      } else child?.kill('SIGKILL');
+      if (this.active === active) {
+        this.ended = true;
+        this.child = undefined;
+        this.control = undefined;
+        this.finishActive(active, 124, 'SIGKILL');
+      }
+    }, 1000);
+    force.unref();
   }
 
   private endStream(stream: OutputStream): void {
@@ -263,42 +360,48 @@ export class ManagedShell {
   }
 
   private handleClose(code: number | null, signal: NodeJS.Signals | null): void {
+    if (process.platform === 'win32' && !signal && code && code > 255 && code <= 64 * 256 && code % 256 === 0) {
+      signal = Object.entries(constants.signals).find(([, number]) => number === code / 256)?.[0] as NodeJS.Signals ?? null;
+    }
     this.ended = true;
     this.child = undefined;
     this.control = undefined;
     const active = this.active;
     if (!active) {
-      this.onExit?.(code, signal);
+      this.onExit?.(code, signal, this.restartable);
       return;
     }
     this.flushPending(active, 'stdout');
     this.flushPending(active, 'stderr');
-    const exitStatus = active.controlComplete ? active.exitStatus : signal === null ? code : null;
+    if (active.cancelled) signal ??= 'SIGTERM';
+    const exitStatus = active.cancelled ? null : active.controlComplete ? active.exitStatus : signal === null ? code : null;
     this.finishActive(active, exitStatus, signal);
-    this.onExit?.(code, signal);
+    this.onExit?.(code, signal, active.limited);
   }
 
   private failActive(error: Error): void {
     const active = this.active;
     if (!active) return;
     this.active = undefined;
+    clearTimeout(active.timer);
     active.reject(error);
   }
 
   private finishActive(active: ActiveRun, exitStatus: number | null, signal: string | null): void {
     if (this.active !== active) return;
     this.active = undefined;
+    clearTimeout(active.timer);
     active.resolve({
       runId: active.runId,
       commandText: active.commandText,
       stdout: Buffer.concat(active.stdout.chunks).toString('utf8'),
       stderr: Buffer.concat(active.stderr.chunks).toString('utf8'),
-      exitStatus,
+      exitStatus: active.limited ? 124 : exitStatus,
       signal,
       startTime: active.startTime,
       durationMs: Date.now() - active.startTime,
       localMetadata: { cwd: active.cwd, shell: this.shellPath },
-      truncation: { stdoutTruncated: false, stderrTruncated: false },
+      truncation: { stdoutTruncated: active.limited, stderrTruncated: active.limited },
     });
   }
 }

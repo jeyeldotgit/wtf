@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -31,11 +31,11 @@ describe("persistent managed shell", () => {
       assert.doesNotMatch(first.stdout, /err-marker/);
       assert.doesNotMatch(first.stderr, /out-marker/);
 
-      const second = await shell.execute("printf '%s\\n' \"$WTF_SESSION_TEST\"; pwd");
+      const second = await shell.execute(`printf '%s\\n' "$WTF_SESSION_TEST"; ${process.platform === 'win32' ? 'cygpath -aw .' : 'pwd'}`);
       assert.equal(second.exitStatus, 0);
       assert.equal(second.localMetadata.cwd, nested);
       assert.match(second.stdout, /preserved/);
-      assert.match(second.stdout, new RegExp(nested.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")));
+      assert.equal(statSync(second.stdout.trim().split('\n').at(-1)!).ino, statSync(nested).ino);
 
       const failed = await shell.execute("false");
       assert.equal(failed.exitStatus, 1);
@@ -45,7 +45,7 @@ describe("persistent managed shell", () => {
       assert.ok(forwarded.stdout.join("").includes("alive"));
       assert.ok(forwarded.stderr.join("").includes("err-marker"));
     } finally {
-      shell.destroy();
+      await shell.close();
       rmSync(root, { recursive: true, force: true });
     }
   });

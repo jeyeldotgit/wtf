@@ -34,6 +34,7 @@ import { listEvidence, persistEvidence } from "../storage/repositories/evidence.
 import { completeToolCall, getPendingToolCall, getToolCalls, hashToolRequest, recordPendingToolCall } from "../storage/repositories/tool-calls.js";
 import { getRun, getRunById } from "../storage/repositories/runs.js";
 import { openDatabase, withTransaction } from "../storage/database.js";
+import { persistReviewProposals } from '../storage/repositories/review-proposals.js';
 
 export const MAX_TOOL_ROUNDS = 3;
 const INITIAL_LOG_EVENT_LIMIT = 10_000;
@@ -44,6 +45,7 @@ export type RunInvestigationDependencies = {
   projectRoot: string;
   runAgent?: (input: RunAgentInput, options: RunAgentOptions) => Promise<unknown>;
   dispatchToolRequest?: (request: unknown, context: DispatchContext, options?: DispatchOptions) => Promise<DispatchResult>;
+  initialEvidence?: RunAgentInput['evidence'];
 };
 
 type FailureDetails = { code: string; summary: string };
@@ -72,6 +74,7 @@ export async function runInvestigation(
       projectRoot: options.projectRoot ?? run.cwd,
       runAgent: options.runAgent,
       dispatchToolRequest: options.dispatchToolRequest,
+      initialEvidence: options.initialEvidence,
     });
   } finally {
     if (ownsDatabase) database.close();
@@ -111,6 +114,7 @@ async function runInvestigationWithDependencies(triggerRunId: string, dependenci
 
     const activeInvestigationId = investigation.id;
     let input = makeInitialInput(database, projectId, run);
+    if (dependencies.initialEvidence?.length) input = appendToolEvidence(input, dependencies.initialEvidence).input;
     withTransaction(database, () => persistEvidenceBatch(database, activeInvestigationId, input.evidence));
     const priorEvidence = listEvidence(database, activeInvestigationId);
     const restored = appendToolEvidence(input, priorEvidence);
@@ -149,7 +153,9 @@ async function runInvestigationWithDependencies(triggerRunId: string, dependenci
         result = RunAgentResultSchema.parse(rawResult);
         if (result.kind === "diagnosis") {
           const diagnosis = validateDiagnosisForInput(result.diagnosis, input);
-          return persistDiagnosis(database, investigationId, projectId, diagnosis, toolRoundCount);
+          const record = persistDiagnosis(database, investigationId, projectId, diagnosis, toolRoundCount);
+          persistReviewProposals(database, investigationId, projectRoot, diagnosis);
+          return record;
         }
       } catch (error) {
         if (allowTools && isInvalidAgentOutput(error)) {

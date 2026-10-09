@@ -30,9 +30,9 @@ export type InvestigationRecord = {
 const TRANSITIONS: Record<InvestigationStatus, InvestigationStatus[]> = {
   investigating: ["awaiting_user", "diagnosed", "needs_input", "awaiting_patch_approval", "resolved", "dismissed", "failed"],
   awaiting_user: ["investigating", "diagnosed", "needs_input", "awaiting_patch_approval", "resolved", "dismissed", "failed"],
-  diagnosed: [],
+  diagnosed: ['investigating'],
   needs_input: ["investigating", "dismissed", "failed"],
-  awaiting_patch_approval: ["resolved", "dismissed", "failed"],
+  awaiting_patch_approval: ["investigating", "resolved", "dismissed", "failed"],
   resolved: [],
   dismissed: [],
   failed: ["investigating", "dismissed"],
