@@ -246,4 +246,3 @@ describe('buildRunAgentInput — schema validation', () => {
     expect(keys).not.toContain('exitStatus');
   });
 });
-

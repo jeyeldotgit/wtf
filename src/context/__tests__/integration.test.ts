@@ -208,4 +208,3 @@ describe('Integration: end-to-end pipeline', () => {
     expect(mockRunAgent).toHaveBeenCalledWith(input);
   });
 });
-

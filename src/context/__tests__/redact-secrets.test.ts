@@ -152,4 +152,3 @@ describe('SecretRedactor (streaming / chunk-aware)', () => {
     expect(result).toContain('Log line 99:');
   });
 });
-

@@ -145,4 +145,3 @@ describe('normalizeOutput', () => {
     expect(result.stderr).toBe('error\n');
   });
 });
-

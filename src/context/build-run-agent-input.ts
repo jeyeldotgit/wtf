@@ -177,4 +177,3 @@ export function buildRunAgentInput(run: CapturedRun): RunAgentInput | null {
   // Validate with Zod schema — throws ZodError on failure
   return RunAgentInputSchema.parse(payload);
 }
-
