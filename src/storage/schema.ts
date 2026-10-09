@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const MIGRATIONS: Record<number, string> = {
   1: `
@@ -197,6 +197,7 @@ const MIGRATIONS: Record<number, string> = {
       UPDATE investigations SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = NEW.id;
     END;
   `,
+  3: `ALTER TABLE runs ADD COLUMN termination_signal TEXT;`,
 };
 
 export function migrateDatabase(database: DatabaseSync, targetVersion = SCHEMA_VERSION): void {

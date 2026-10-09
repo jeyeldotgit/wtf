@@ -39,6 +39,7 @@ export interface CapturedRun {
   stderr: string;
   /** 0–255, or null when the exit code is unknown (e.g. killed by signal). */
   exitStatus: number | null;
+  signal?: string | null;
   /** Date.now() at spawn time. */
   startTime: number;
   /** Elapsed milliseconds. */

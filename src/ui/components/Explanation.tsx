@@ -1,66 +1,43 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { FixPatch } from '../types/index.js';
+import type { Diagnosis } from '../../agents/schemas.js';
 
 interface ExplanationProps {
-  fix: FixPatch;
+  diagnosis: Diagnosis;
 }
 
-export const Explanation: React.FC<ExplanationProps> = ({ fix }) => {
-  const getConfidenceColor = () => {
-    switch (fix.confidence) {
-      case 'high':
-        return 'green';
-      case 'medium':
-        return 'yellow';
-      case 'low':
-        return 'red';
-      default:
-        return 'white';
-    }
-  };
+export const Explanation: React.FC<ExplanationProps> = ({ diagnosis }) => (
+  <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
+    <Text bold color="cyan">Diagnosis</Text>
+    <Text>{diagnosis.summary}</Text>
 
-  return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor="cyan"
-      paddingX={1}
-      marginBottom={1}
-    >
-      <Box justifyContent="space-between" marginBottom={1}>
-        <Text bold color="cyan">
-          💡 Teaching & Concept Explanation
-        </Text>
-        <Box>
-          <Text dimColor>Confidence: </Text>
-          <Text bold color={getConfidenceColor()}>
-            {fix.confidence.toUpperCase()}
-          </Text>
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold>What the evidence shows</Text>
+      {diagnosis.observations.map((observation, index) => (
+        <Box key={`${index}-${observation.statement}`} flexDirection="column" marginLeft={1}>
+          <Text>{observation.statement}</Text>
+          <Text dimColor>Cites: {observation.evidenceIds.join(', ')}</Text>
         </Box>
-      </Box>
-
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color="white">
-          Why this happened:
-        </Text>
-        {fix.conceptExplanation.map((point, idx) => (
-          <Box key={idx} marginLeft={1}>
-            <Text color="cyan">• </Text>
-            <Text>{point}</Text>
-          </Box>
-        ))}
-      </Box>
-
-      <Box flexDirection="column">
-        <Text bold color="white">
-          How this fix resolves it:
-        </Text>
-        <Box marginLeft={1}>
-          <Text color="green">✔ </Text>
-          <Text>{fix.whyFixWorks}</Text>
-        </Box>
-      </Box>
+      ))}
     </Box>
-  );
-};
+
+    {diagnosis.likelyCause && (
+      <Box flexDirection="column" marginTop={1}>
+        <Text bold>Likely cause <Text color="yellow">({diagnosis.likelyCause.confidence} confidence)</Text></Text>
+        <Text>{diagnosis.likelyCause.cause}</Text>
+        <Text dimColor>{diagnosis.likelyCause.rationale}</Text>
+        <Text dimColor>Cites: {diagnosis.likelyCause.evidenceIds.join(', ')}</Text>
+      </Box>
+    )}
+
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold>What this means</Text>
+      {diagnosis.beginnerExplanation.map((point, index) => (
+        <Box key={`${index}-${point}`} marginLeft={1}>
+          <Text color="cyan">• </Text>
+          <Text>{point}</Text>
+        </Box>
+      ))}
+    </Box>
+  </Box>
+);

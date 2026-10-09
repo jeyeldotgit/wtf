@@ -27,6 +27,7 @@ import {
 import { runInvestigation } from "../../src/investigation/run-investigation.js";
 import { createInvestigation, getInvestigationByTriggerRun } from "../../src/storage/repositories/investigations.js";
 import { getToolCalls } from "../../src/storage/repositories/tool-calls.js";
+import { listEvidence } from "../../src/storage/repositories/evidence.js";
 import { createCompletedRun } from "../../src/storage/repositories/runs.js";
 import { openDatabase } from "../../src/storage/database.js";
 import { migrateDatabase } from "../../src/storage/schema.js";
@@ -121,6 +122,7 @@ describe("bounded investigation loop", () => {
       assert.equal(result.status, "diagnosed");
       assert.equal(result.toolRoundCount, 0);
       assert.deepEqual(calls, [true]);
+      assert.equal(listEvidence(context.database, result.id)[0].id, "run_log_stderr_stage3-failed-run");
       assert.deepEqual(getToolCalls(context.database, result.id), []);
     } finally {
       context.close();
@@ -515,14 +517,15 @@ describe("bounded investigation loop", () => {
     database.exec("PRAGMA foreign_keys = ON");
     try {
       migrateDatabase(database, 1);
-      const legacyRun = createCompletedRun(database, {
-        id: "legacy-run",
-        projectId: "legacy-project",
-        commandDisplay: "pnpm test",
-        cwd: "/tmp/legacy-project",
-        exitCode: 1,
-        stderr: "legacy failure\n",
-      });
+      database.prepare(`
+        INSERT INTO runs (id, project_id, command_display, cwd, start_time, end_time, exit_code, status, stderr_bytes)
+        VALUES ('legacy-run', 'legacy-project', 'pnpm test', '/tmp/legacy-project', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z', 1, 'failed', 14)
+      `).run();
+      database.prepare(`
+        INSERT INTO log_events (run_id, stream, sequence, content, created_at)
+        VALUES ('legacy-run', 'stderr', 0, 'legacy failure', '2026-01-01T00:00:01.000Z')
+      `).run();
+      const legacyRun = { id: "legacy-run", projectId: "legacy-project" };
       const legacyInvestigation = createInvestigation(database, {
         id: "legacy-investigation",
         projectId: legacyRun.projectId,
@@ -540,7 +543,7 @@ describe("bounded investigation loop", () => {
       const version = database.prepare("PRAGMA user_version").get() as { user_version: number };
       const investigation = database.prepare("SELECT status, last_error_code, tool_round_count FROM investigations WHERE id = 'legacy-investigation'").get() as Record<string, string | number | null>;
       const call = database.prepare("SELECT request_json, outcome_status FROM investigation_tool_calls WHERE id = 'legacy-call'").get() as Record<string, string>;
-      assert.equal(version.user_version, 2);
+      assert.equal(version.user_version, 3);
       assert.equal(investigation.status, "investigating");
       assert.equal(investigation.last_error_code, null);
       assert.equal(investigation.tool_round_count, 0);

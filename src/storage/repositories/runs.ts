@@ -16,6 +16,7 @@ export type RunRecord = {
   startTime: string;
   endTime: string | null;
   exitCode: number | null;
+  signal: string | null;
   status: RunStatus;
   stdoutBytes: number;
   stderrBytes: number;
@@ -44,6 +45,7 @@ export function createRun(database: DatabaseSync, input: {
     startTime,
     endTime: null,
     exitCode: null,
+    signal: null,
     status: "running",
     stdoutBytes: 0,
     stderrBytes: 0,
@@ -53,7 +55,8 @@ export function createRun(database: DatabaseSync, input: {
 export function completeRun(database: DatabaseSync, input: {
   runId: string;
   projectId: string;
-  exitCode: number;
+  exitCode: number | null;
+  signal?: string | null;
   stdout?: string;
   stderr?: string;
   events?: RunStreamEvent[];
@@ -69,7 +72,8 @@ export function completeRun(database: DatabaseSync, input: {
 function completeRunWithinTransaction(database: DatabaseSync, input: {
   runId: string;
   projectId: string;
-  exitCode: number;
+  exitCode: number | null;
+  signal?: string | null;
   stdout?: string;
   stderr?: string;
   events?: RunStreamEvent[];
@@ -82,7 +86,7 @@ function completeRunWithinTransaction(database: DatabaseSync, input: {
     ...stderr.split(/(?<=\n)/).filter(Boolean).map((content) => ({ stream: "stderr" as const, content })),
   ];
   const sorted = events.map((event, index) => ({ ...event, sequence: event.sequence ?? index }));
-  const status: RunStatus = input.exitCode === 0 ? "completed" : "failed";
+  const status: RunStatus = input.exitCode === null ? "cancelled" : input.exitCode === 0 ? "completed" : "failed";
   const endTime = input.endTime ?? new Date().toISOString();
   const stdoutBytes = input.stdout === undefined
     ? Buffer.byteLength(sorted.filter((event) => event.stream === "stdout").map((event) => event.content).join(""))
@@ -105,15 +109,15 @@ function completeRunWithinTransaction(database: DatabaseSync, input: {
   }
   database.prepare(`
     UPDATE runs
-    SET end_time = ?, exit_code = ?, status = ?, stdout_bytes = ?, stderr_bytes = ?
+    SET end_time = ?, exit_code = ?, status = ?, termination_signal = ?, stdout_bytes = ?, stderr_bytes = ?
     WHERE id = ? AND project_id = ? AND status = 'running'
-  `).run(endTime, input.exitCode, status, stdoutBytes, stderrBytes, input.runId, input.projectId);
+  `).run(endTime, input.exitCode, status, input.signal ?? null, stdoutBytes, stderrBytes, input.runId, input.projectId);
 }
 
 export function getRun(database: DatabaseSync, projectId: string, runId: string): RunRecord | undefined {
   const row = database.prepare(`
     SELECT id, project_id, investigation_id, command_display, cwd, start_time, end_time, exit_code,
-      status, stdout_bytes, stderr_bytes
+      status, stdout_bytes, stderr_bytes, termination_signal
     FROM runs WHERE id = ? AND project_id = ?
   `).get(runId, projectId) as Record<string, string | number | null> | undefined;
   return row ? mapRun(row) : undefined;
@@ -122,7 +126,7 @@ export function getRun(database: DatabaseSync, projectId: string, runId: string)
 export function getRunById(database: DatabaseSync, runId: string): RunRecord | undefined {
   const row = database.prepare(`
     SELECT id, project_id, investigation_id, command_display, cwd, start_time, end_time, exit_code,
-      status, stdout_bytes, stderr_bytes
+      status, stdout_bytes, stderr_bytes, termination_signal
     FROM runs WHERE id = ?
   `).get(runId) as Record<string, string | number | null> | undefined;
   return row ? mapRun(row) : undefined;
@@ -133,7 +137,8 @@ export function createCompletedRun(database: DatabaseSync, input: {
   projectId: string;
   commandDisplay: string;
   cwd: string;
-  exitCode: number;
+  exitCode: number | null;
+  signal?: string | null;
   stdout?: string;
   stderr?: string;
   events?: RunStreamEvent[];
@@ -173,6 +178,7 @@ function mapRun(row: Record<string, string | number | null>): RunRecord {
     startTime: String(row.start_time),
     endTime: row.end_time === null ? null : String(row.end_time),
     exitCode: row.exit_code === null ? null : Number(row.exit_code),
+    signal: row.termination_signal === null ? null : String(row.termination_signal),
     status: String(row.status) as RunStatus,
     stdoutBytes: Number(row.stdout_bytes),
     stderrBytes: Number(row.stderr_bytes),
