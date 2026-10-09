@@ -1,10 +1,9 @@
-import { InvestigationData } from './types/index.js';
 import mockTerminalErrors from './mock-terminal-errors.json' with { type: 'json' };
 
 export interface TestScenario {
   id: string;
   title: string;
-  data: InvestigationData;
+  data: unknown;
 }
 
 // Load all 10 terminal error scenarios directly from mock-terminal-errors.json

@@ -111,6 +111,7 @@ async function runInvestigationWithDependencies(triggerRunId: string, dependenci
 
     const activeInvestigationId = investigation.id;
     let input = makeInitialInput(database, projectId, run);
+    withTransaction(database, () => persistEvidenceBatch(database, activeInvestigationId, input.evidence));
     const priorEvidence = listEvidence(database, activeInvestigationId);
     const restored = appendToolEvidence(input, priorEvidence);
     input = restored.input;

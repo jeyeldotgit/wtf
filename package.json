@@ -18,7 +18,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/run.js",
     "typecheck": "tsc --noEmit -p tsconfig.eval.json",
-    "test": "node --import tsx --test tests/agents/agent-contract.test.ts tests/stage2/storage-tools.test.ts tests/stage3/run-investigation.test.ts && vitest run src/context/__tests__",
+    "test": "node --import tsx --test tests/agents/agent-contract.test.ts tests/stage2/storage-tools.test.ts tests/stage3/run-investigation.test.ts tests/session/managed-shell.test.ts tests/session/run-session.test.ts tests/session/investigation-view-model.test.ts && vitest run src/context/__tests__",
     "test:watch": "vitest src/context/__tests__",
     "eval:agent": "tsx evals/run-agent.eval.ts",
     "eval:dataset:create": "tsx evals/sync-laminar-dataset.ts create",

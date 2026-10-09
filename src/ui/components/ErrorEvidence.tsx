@@ -1,48 +1,44 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { FailureEvidence } from '../types/index.js';
+import type { RunAgentEvidence } from '../../agents/schemas.js';
+import type { RunSummary } from '../adapters/investigation-view-model.js';
 
 interface ErrorEvidenceProps {
-  failure: FailureEvidence;
+  run: RunSummary;
+  output: string;
+  evidence: RunAgentEvidence[];
 }
 
-export const ErrorEvidence: React.FC<ErrorEvidenceProps> = ({ failure }) => {
+export const ErrorEvidence: React.FC<ErrorEvidenceProps> = ({ run, output, evidence }) => {
+  const status = run.exitCode === null ? 'exit status unavailable' : `exit code ${run.exitCode}`;
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Box marginBottom={0}>
-        <Text bold color="red">
-          ✗ Command Failed:
+      <Box>
+        <Text bold color={run.status === 'failed' ? 'red' : 'green'}>
+          {run.status === 'failed' ? 'Command failed:' : run.status === 'cancelled' ? 'Command interrupted:' : 'Command completed:'}
         </Text>
-        <Text color="yellow"> {failure.command}</Text>
-        <Text dimColor> (exit code {failure.exitCode})</Text>
+        <Text color="yellow"> {run.commandDisplay}</Text>
+        <Text dimColor> ({status})</Text>
       </Box>
 
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor="red"
-        paddingX={1}
-        marginTop={1}
-      >
-        <Box marginBottom={1}>
-          <Text bold color="white">
-            Diagnostic Summary:{' '}
-          </Text>
-          <Text color="red">{failure.errorSummary}</Text>
+      {output && (
+        <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} marginTop={1}>
+          <Text bold dimColor>Captured output</Text>
+          <Text>{output}</Text>
         </Box>
+      )}
 
-        <Box flexDirection="column">
-          <Text dimColor bold>
-            Captured Log Evidence:
-          </Text>
-          {failure.rawLogLines.map((line, idx) => (
-            <Box key={idx}>
-              <Text dimColor>{String(idx + 1).padStart(2, ' ')} │ </Text>
-              <Text color="white">{line}</Text>
+      {evidence.length > 0 && (
+        <Box flexDirection="column" borderStyle="round" borderColor="red" paddingX={1} marginTop={1}>
+          <Text bold color="white">Evidence used for this diagnosis</Text>
+          {evidence.map((item) => (
+            <Box key={item.id} flexDirection="column" marginTop={1}>
+              <Text dimColor>{item.id} · {item.sourceType}{item.relativePath ? ` · ${item.relativePath}` : ''}</Text>
+              <Text color="white">{item.excerpt}</Text>
             </Box>
           ))}
         </Box>
-      </Box>
+      )}
     </Box>
   );
 };

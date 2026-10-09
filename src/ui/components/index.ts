@@ -5,3 +5,4 @@ export * from './DiffViewer.js';
 export * from './VerificationCard.js';
 export * from './ApprovalPrompt.js';
 export * from './QuestionModal.js';
+export * from './CommandPrompt.js';

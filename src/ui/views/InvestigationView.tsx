@@ -1,210 +1,148 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { Spinner } from '@inkjs/ui';
 import {
-  Header,
+  ApprovalPrompt,
+  CommandPrompt,
+  DiffViewer,
   ErrorEvidence,
   Explanation,
-  DiffViewer,
-  VerificationCard,
-  ApprovalPrompt,
+  Header,
   QuestionModal,
+  VerificationCard,
 } from '../components/index.js';
-import { InvestigationData, UIState } from '../types/index.js';
-import { testScenarios } from '../test-scenarios.js';
+import type { RunSession, RunSessionEvent } from '../../session/run-session.js';
+import {
+  buildInvestigationViewModel,
+  buildRunSummary,
+  sanitizeTerminalText,
+  type InvestigationViewModel,
+  type RunSummary,
+} from '../adapters/investigation-view-model.js';
+import type { UIState } from '../types/index.js';
+
+const MAX_VISIBLE_OUTPUT_CHARACTERS = 24_000;
 
 export interface InvestigationViewProps {
-  initialScenarioIndex?: number;
+  session: RunSession;
   onExit?: () => void;
 }
 
-export const InvestigationView: React.FC<InvestigationViewProps> = ({
-  initialScenarioIndex = 0,
-  onExit,
-}) => {
-  const [activeScenarioIdx, setActiveScenarioIdx] = useState<number>(initialScenarioIndex);
-  const [data, setData] = useState<InvestigationData>(testScenarios[initialScenarioIndex].data);
-  const [verificationOutput, setVerificationOutput] = useState<string[]>([]);
-  const [userQuestionResponse, setUserQuestionResponse] = useState<string | null>(null);
-
+export const InvestigationView: React.FC<InvestigationViewProps> = ({ session, onExit }) => {
+  const [state, setState] = useState<UIState>('shell_ready');
+  const [activeCommand, setActiveCommand] = useState<string | null>(null);
+  const [run, setRun] = useState<RunSummary | null>(null);
+  const [viewModel, setViewModel] = useState<InvestigationViewModel | null>(null);
+  const [output, setOutput] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const activeRunId = useRef<string | null>(null);
   const isInteractive = Boolean(process.stdin.isTTY);
 
-  // Allow switching test scenarios using keys 1-9, 0 (for 10), or left/right arrow keys
-  // Only active when not currently typing in QuestionModal
-  useInput(
-    (input, key) => {
-      let targetIdx: number | null = null;
-      if (input >= '1' && input <= '9') {
-        targetIdx = parseInt(input, 10) - 1;
-      } else if (input === '0' && testScenarios.length >= 10) {
-        targetIdx = 9; // '0' key selects scenario 10
-      } else if (key.rightArrow || key.downArrow) {
-        targetIdx = (activeScenarioIdx + 1) % testScenarios.length;
-      } else if (key.leftArrow || key.upArrow) {
-        targetIdx = (activeScenarioIdx - 1 + testScenarios.length) % testScenarios.length;
-      }
+  useEffect(() => session.subscribe(handleSessionEvent), [session]);
 
-      if (targetIdx !== null && targetIdx >= 0 && targetIdx < testScenarios.length) {
-        setActiveScenarioIdx(targetIdx);
-        setData(testScenarios[targetIdx].data);
-        setVerificationOutput([]);
-        setUserQuestionResponse(null);
-      }
-    },
-    { isActive: isInteractive && data.state !== 'asking_question' }
-  );
+  useInput((input, key) => {
+    if (key.ctrl && input === 'c') onExit?.();
+  }, { isActive: isInteractive });
 
-  const handleApprovePatch = () => {
-    setData((prev) => ({
-      ...prev,
-      state: 'patch_approved',
-    }));
+  const handleSessionEvent = (event: RunSessionEvent) => {
+    switch (event.type) {
+      case 'command_started':
+        activeRunId.current = event.runId;
+        setActiveCommand(event.commandDisplay);
+        setRun(null);
+        setViewModel(null);
+        setOutput('');
+        setMessage(null);
+        setState('running_command');
+        break;
+      case 'output':
+        if (activeRunId.current !== event.runId) break;
+        setOutput((previous) => `${previous}${sanitizeTerminalText(event.text)}`.slice(-MAX_VISIBLE_OUTPUT_CHARACTERS));
+        break;
+      case 'command_completed':
+        setActiveCommand(null);
+        setRun(buildRunSummary(event.run));
+        setState(event.run.status === 'failed' ? 'investigating' : 'shell_ready');
+        break;
+      case 'investigation_started':
+        setState('investigating');
+        break;
+      case 'investigation_completed':
+        try {
+          const next = buildInvestigationViewModel(event.run, event.investigation, event.evidence);
+          setRun(next.run);
+          setViewModel(next);
+          setState(stateForInvestigation(next.status));
+          setMessage(next.errorSummary);
+        } catch {
+          setState('failed');
+          setMessage('The stored diagnosis could not be safely displayed.');
+        }
+        break;
+      case 'investigation_error':
+      case 'session_error':
+        setState('failed');
+        setMessage(event.message);
+        break;
+      case 'session_ended':
+        setState('session_ended');
+        onExit?.();
+        break;
+    }
   };
 
-  const handleRejectPatch = () => {
-    setData((prev) => ({
-      ...prev,
-      state: 'patch_rejected',
-    }));
+  const handleCommand = async (command: string) => {
+    setMessage(null);
+    try {
+      await session.execute(command);
+    } catch {
+      setState('failed');
+      setMessage('The command session could not complete this request.');
+    }
   };
 
-  const handleRunVerification = () => {
-    setData((prev) => ({
-      ...prev,
-      state: 'verifying',
-    }));
-
-    setTimeout(() => {
-      setVerificationOutput([
-        `> Running verification: ${data.verification?.command || 'test'}`,
-        '✔ Verification passed! All checks succeeded.',
-      ]);
-      setData((prev) => ({
-        ...prev,
-        state: 'verified_success',
-      }));
-    }, 1200);
-  };
-
-  const handleSkipVerification = () => {
-    if (onExit) onExit();
-  };
-
-  const handleAskQuestion = () => {
-    setData((prev) => ({
-      ...prev,
-      state: 'asking_question',
-    }));
-  };
-
-  const handleSubmitQuestion = (q: string) => {
-    setUserQuestionResponse(
-      `Q: "${q}"\nWTF Answer: This error occurred because of type mismatch or missing definitions. The proposed patch safely handles the edge case.`
-    );
-    setData((prev) => ({
-      ...prev,
-      state: 'diagnosis_ready',
-    }));
-  };
-
-  const handleCancelQuestion = () => {
-    setData((prev) => ({
-      ...prev,
-      state: 'diagnosis_ready',
-    }));
-  };
-
-  const handleReset = () => {
-    // Reset current scenario back to initial diagnosis
-    setData(testScenarios[activeScenarioIdx].data);
-    setVerificationOutput([]);
-    setUserQuestionResponse(null);
-  };
+  const diagnosis = viewModel?.diagnosis ?? null;
+  const working = state === 'running_command' || state === 'investigating';
 
   return (
     <Box flexDirection="column" padding={1}>
-      {/* Test Scenario Switcher Toolbar */}
-      <Box
-        flexDirection="column"
-        borderStyle="single"
-        borderColor="gray"
-        paddingX={1}
-        marginBottom={1}
-      >
-        <Box justifyContent="space-between">
-          <Text bold color="cyan">🧪 TEST SCENARIOS (Press 1-9, 0 or ← / → arrows):</Text>
-          <Text color="yellow">Active: [{activeScenarioIdx + 1}/10] {testScenarios[activeScenarioIdx].title}</Text>
-        </Box>
-        <Box flexWrap="wrap" marginTop={1}>
-          {testScenarios.map((sc, idx) => (
-            <Box key={sc.id} marginRight={1}>
-              <Text
-                bold={idx === activeScenarioIdx}
-                color={idx === activeScenarioIdx ? 'yellow' : 'gray'}
-              >
-                [{idx === 9 ? '0' : idx + 1}] {sc.id}
-              </Text>
-            </Box>
-          ))}
-        </Box>
-      </Box>
+      <Header state={state} />
 
-      <Header state={data.state} />
-
-      <ErrorEvidence failure={data.failure} />
-
-      {data.state === 'investigating' && (
-        <Box marginY={1}>
-          <Spinner label="WTF is investigating failure & gathering project context..." />
+      {run && <ErrorEvidence run={run} output={output} evidence={viewModel?.evidence ?? []} />}
+      {!run && (activeCommand || output) && (
+        <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} marginBottom={1}>
+          {activeCommand && <Text color="yellow">$ {activeCommand}</Text>}
+          {output && <Text>{output}</Text>}
         </Box>
       )}
 
-      {data.fix && data.state !== 'investigating' && (
-        <>
-          <Explanation fix={data.fix} />
-          <DiffViewer patch={data.fix} />
-        </>
-      )}
+      {state === 'running_command' && <Spinner label="Command is running..." />}
+      {state === 'investigating' && <Spinner label="Investigating the failed command..." />}
+      {message && <Text color="red">{message}</Text>}
 
-      {userQuestionResponse && (
-        <Box
-          flexDirection="column"
-          borderStyle="single"
-          borderColor="blue"
-          paddingX={1}
-          marginBottom={1}
-        >
-          <Text bold color="blue">
-            💬 Follow-up Explanation:
-          </Text>
-          <Text>{userQuestionResponse}</Text>
-        </Box>
-      )}
+      {diagnosis && <Explanation diagnosis={diagnosis} />}
+      {diagnosis?.proposedFix && <DiffViewer proposedFix={diagnosis.proposedFix} />}
+      {diagnosis?.missingInformation[0] && <QuestionModal question={diagnosis.missingInformation[0]} />}
+      {diagnosis?.verificationCommand && <VerificationCard verification={diagnosis.verificationCommand} />}
+      {diagnosis?.proposedFix && <ApprovalPrompt state="proposal_available" />}
 
-      {data.verification && (
-        <VerificationCard
-          state={data.state}
-          verification={data.verification}
-          outputSnippet={verificationOutput}
-        />
-      )}
-
-      {data.state === 'asking_question' ? (
-        <QuestionModal
-          onSubmit={handleSubmitQuestion}
-          onCancel={handleCancelQuestion}
-        />
-      ) : (
-        <ApprovalPrompt
-          state={data.state}
-          onApprovePatch={handleApprovePatch}
-          onRejectPatch={handleRejectPatch}
-          onRunVerification={handleRunVerification}
-          onSkipVerification={handleSkipVerification}
-          onAskQuestion={handleAskQuestion}
-          onReset={handleReset}
-        />
-      )}
+      {state !== 'session_ended' && <CommandPrompt disabled={working} onSubmit={handleCommand} />}
     </Box>
   );
 };
+
+function stateForInvestigation(status: InvestigationViewModel['status']): UIState {
+  switch (status) {
+    case 'investigating':
+      return 'investigating';
+    case 'needs_input':
+    case 'awaiting_user':
+      return 'needs_input';
+    case 'awaiting_patch_approval':
+      return 'proposal_available';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'diagnosed';
+  }
+}
