@@ -18,7 +18,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/run.js",
     "typecheck": "tsc --noEmit -p tsconfig.eval.json",
-    "test": "node --import tsx --test tests/agents/agent-contract.test.ts tests/stage2/storage-tools.test.ts",
+    "test": "node --import tsx --test tests/agents/agent-contract.test.ts tests/stage2/storage-tools.test.ts && vitest run src/context/__tests__",
+    "test:watch": "vitest src/context/__tests__",
     "eval:agent": "tsx evals/run-agent.eval.ts",
     "eval:dataset:create": "tsx evals/sync-laminar-dataset.ts create",
     "eval:dataset:push": "tsx evals/sync-laminar-dataset.ts push"
@@ -38,6 +39,7 @@
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
   }
 }

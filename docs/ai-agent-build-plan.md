@@ -48,10 +48,11 @@ The runner repeats each case three times and records outcome kind, tool policy, 
 
 The model identifier and prompt version are attached to evaluation metadata. Compare prompt or model changes in Laminar using the same dataset and repeat count.
 
-## Next integration steps
+## Next build stages
 
-1. Build application services that implement each returned read-only tool request with result count, path, and byte limits.
-2. Redact and assign stable evidence ids to every tool result before another agent call.
-3. Add a diagnosis renderer that presents observations, uncertainty, explanation, and proposed diffs separately.
-4. Put patch approval and command approval behind distinct explicit user actions.
-5. Expand the synthetic dataset when adding tools or changing the diagnosis contract. Keep runtime Laminar tracing opt-in and isolated from real user data.
+Stage 1's command-capture and validated-input boundary is described in the [command capture build plan](command-capture-build-plan.md). Continue with these separate integration stages:
+
+1. [Stage 2: local storage and bounded tools](build-stage-2-storage-and-tools.md) — persist local run and investigation history, and implement read-only handlers for all three requested tools.
+2. [Stage 3: bounded investigation loop](build-stage-3-investigation-loop.md) — execute validated requests in the application, append identified evidence, and call the agent again until it returns a diagnosis or one focused question.
+3. [Stage 4: diagnosis review and separate approvals](build-stage-4-diagnosis-review-and-approvals.md) — render the result and exact proposed diff, then keep patch and command approvals as separate user actions.
+4. Expand the synthetic dataset when tools, evidence, or diagnosis behavior changes. Keep runtime Laminar tracing opt-in and isolated from real user data.
