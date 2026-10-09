@@ -1,4 +1,4 @@
-# Build plan: command capture and safe agent input
+# Build stage 1: command capture and safe agent input
 
 **Status:** Planned integration slice
 
@@ -43,7 +43,7 @@ The input builder must stay aligned with the current schema limits:
 | Evidence entries | 1–30 |
 | Combined command, streams, and evidence | 48,000 characters |
 
-For this first capture slice, use at most one `run_log` evidence excerpt for stdout and one for stderr. Select useful, redacted excerpts when a stream is longer than 4,000 characters. With the field limits above, command text, both streams, and two excerpts total at most 41,000 characters, leaving 7,000 characters for future context. Keep all truncation markers inside their field limits. Validate the aggregate limit in the schema rather than relying only on the individual caps.
+For capture alone, use at most one `run_log` evidence excerpt for stdout and one for stderr. Select useful, redacted excerpts when a stream is longer than 4,000 characters. Those field limits total at most 41,000 characters. When the stage 3 investigation loop is added, reserve up to 16,000 characters for tool evidence and cap the initial projected context at 32,000 characters. Keep all truncation markers inside their field limits and validate the aggregate limit in the schema.
 
 Evidence IDs must be unique within the input, stable for a run and stream, and no longer than the schema's 80-character limit. Omit `relativePath` for `run_log` evidence. Since the schema requires at least one evidence entry, a failed command with empty stdout and stderr should receive one deterministic `run_log` excerpt stating its exit status and that both streams were empty.
 
