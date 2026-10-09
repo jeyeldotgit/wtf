@@ -14,7 +14,8 @@ export function isSafeProjectRelativePath(value: string): boolean {
   if (parts.some((part) => [".ssh", ".aws", ".gnupg"].includes(part.toLowerCase()))) return false;
   if (parts.some((part) => /^(?:\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|credentials(?:\..+)?|service-account\.json)$/i.test(part))) return false;
   if (parts.some((part) => /\.(?:pem|key|p12|pfx|crt|cer|der|jks)$/i.test(part))) return false;
-  if (parts.some((part) => /^(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)$/i.test(part))) return false;
+  if (parts.some((part) => /^(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|npm-shrinkwrap\.json|cargo\.lock|poetry\.lock|pipfile\.lock|composer\.lock|gemfile\.lock|go\.sum)$/i.test(part))) return false;
+  if (parts.some((part) => /\.(?:exe|dll|so|dylib|bin|class|jar|war|zip|gz|tgz|7z|rar|pdf|png|jpe?g|gif|ico|woff2?|ttf|otf|mp[34]|sqlite|db)$/i.test(part))) return false;
   return true;
 }
 
@@ -22,7 +23,7 @@ const safeRelativePath = z.string().refine(isSafeProjectRelativePath, "must be a
 
 export const RunAgentEvidenceSchema = z.object({
   id: z.string().trim().min(1).max(80),
-  sourceType: z.enum(["run_log", "historical_log", "project_file"]),
+  sourceType: z.enum(["run_log", "historical_log", "project_file", "tool_result"]),
   relativePath: safeRelativePath.optional(),
   excerpt: z.string().max(4_000),
 }).strict().superRefine((evidence, context) => {
@@ -59,7 +60,7 @@ export const RunAgentInputSchema = z.object({
 });
 
 export const GetRecentLogsInputSchema = z.object({
-  runId: z.string().trim().min(1).max(100),
+  runId: z.string().trim().min(1).max(100).optional(),
   limit: z.number().int().min(1).max(20).default(5),
 }).strict();
 
