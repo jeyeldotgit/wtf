@@ -119,6 +119,15 @@ export function getRun(database: DatabaseSync, projectId: string, runId: string)
   return row ? mapRun(row) : undefined;
 }
 
+export function getRunById(database: DatabaseSync, runId: string): RunRecord | undefined {
+  const row = database.prepare(`
+    SELECT id, project_id, investigation_id, command_display, cwd, start_time, end_time, exit_code,
+      status, stdout_bytes, stderr_bytes
+    FROM runs WHERE id = ?
+  `).get(runId) as Record<string, string | number | null> | undefined;
+  return row ? mapRun(row) : undefined;
+}
+
 export function createCompletedRun(database: DatabaseSync, input: {
   id?: string;
   projectId: string;

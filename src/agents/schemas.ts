@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 const MAX_TEXT = 16_000;
+export const MAX_RUN_AGENT_INPUT_CHARS = 48_000;
+export const MAX_RUN_AGENT_EVIDENCE_EXCERPT_CHARS = 4_000;
+export const MAX_RUN_AGENT_EVIDENCE_COUNT = 30;
 
 export function isSafeProjectRelativePath(value: string): boolean {
   if (!value || value.length > 240 || /[\u0000-\u001f\u007f]/.test(value)) return false;
@@ -25,7 +28,7 @@ export const RunAgentEvidenceSchema = z.object({
   id: z.string().trim().min(1).max(80),
   sourceType: z.enum(["run_log", "historical_log", "project_file", "tool_result"]),
   relativePath: safeRelativePath.optional(),
-  excerpt: z.string().max(4_000),
+  excerpt: z.string().max(MAX_RUN_AGENT_EVIDENCE_EXCERPT_CHARS),
 }).strict().superRefine((evidence, context) => {
   if (evidence.sourceType === "project_file" && !evidence.relativePath) {
     context.addIssue({ code: "custom", path: ["relativePath"], message: "project file evidence requires a relative path" });
@@ -41,14 +44,14 @@ export const RunAgentInputSchema = z.object({
   exitCode: z.number().int().min(1).max(255),
   stdout: z.string().max(MAX_TEXT),
   stderr: z.string().max(MAX_TEXT),
-  evidence: z.array(RunAgentEvidenceSchema).min(1).max(30),
+  evidence: z.array(RunAgentEvidenceSchema).min(1).max(MAX_RUN_AGENT_EVIDENCE_COUNT),
 }).strict().superRefine((input, context) => {
   const ids = new Set<string>();
   const totalCharacters = input.commandDisplay.length
     + input.stdout.length
     + input.stderr.length
     + input.evidence.reduce((sum, item) => sum + item.excerpt.length, 0);
-  if (totalCharacters > 48_000) {
+  if (totalCharacters > MAX_RUN_AGENT_INPUT_CHARS) {
     context.addIssue({ code: "custom", path: ["evidence"], message: "combined run context must be at most 48,000 characters" });
   }
   input.evidence.forEach((item, index) => {
@@ -111,7 +114,7 @@ export const ToolRequestSchema = z.discriminatedUnion("toolName", [
 
 export const RunAgentResultSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("diagnosis"), diagnosis: DiagnosisSchema }).strict(),
-  z.object({ kind: z.literal("tool_requests"), requests: z.array(ToolRequestSchema).min(1).max(5) }).strict(),
+  z.object({ kind: z.literal("tool_requests"), requests: z.array(ToolRequestSchema).length(1) }).strict(),
 ]);
 
 export type RunAgentInput = z.infer<typeof RunAgentInputSchema>;

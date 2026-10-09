@@ -86,7 +86,7 @@ export function buildRunAgentInput(run: CapturedRun): RunAgentInput | null {
   if (stdout.length > 0) {
     evidence.push({
       id: evidenceId('stdout', runId),
-      type: 'run_log' as const,
+      sourceType: 'run_log' as const,
       excerpt: truncateChars(stdout, EVIDENCE_EXCERPT_LIMIT),
     });
   }
@@ -94,7 +94,7 @@ export function buildRunAgentInput(run: CapturedRun): RunAgentInput | null {
   if (stderr.length > 0) {
     evidence.push({
       id: evidenceId('stderr', runId),
-      type: 'run_log' as const,
+      sourceType: 'run_log' as const,
       excerpt: truncateChars(stderr, EVIDENCE_EXCERPT_LIMIT),
     });
   }
@@ -103,17 +103,15 @@ export function buildRunAgentInput(run: CapturedRun): RunAgentInput | null {
   if (evidence.length === 0) {
     evidence.push({
       id: evidenceId('empty', runId),
-      type: 'run_log' as const,
+      sourceType: 'run_log' as const,
       excerpt: `Command failed with exit status ${exitCode}. Both stdout and stderr were empty.`,
     });
   }
 
   // ── Aggregate budget enforcement ────────────────────────────────────────
   const computeTotal = (): number => {
-    let total = runId.length + commandDisplay.length + stdout.length + stderr.length;
-    for (const e of evidence) {
-      total += e.id.length + e.excerpt.length;
-    }
+    let total = commandDisplay.length + stdout.length + stderr.length;
+    for (const e of evidence) total += e.excerpt.length;
     return total;
   };
 
@@ -136,21 +134,21 @@ export function buildRunAgentInput(run: CapturedRun): RunAgentInput | null {
       if (stdout.length > 0) {
         evidence.push({
           id: evidenceId('stdout', runId),
-          type: 'run_log' as const,
+          sourceType: 'run_log' as const,
           excerpt: truncateChars(stdout, EVIDENCE_EXCERPT_LIMIT),
         });
       }
       if (stderr.length > 0) {
         evidence.push({
           id: evidenceId('stderr', runId),
-          type: 'run_log' as const,
+          sourceType: 'run_log' as const,
           excerpt: truncateChars(stderr, EVIDENCE_EXCERPT_LIMIT),
         });
       }
       if (evidence.length === 0) {
         evidence.push({
           id: evidenceId('empty', runId),
-          type: 'run_log' as const,
+          sourceType: 'run_log' as const,
           excerpt: `Command failed with exit status ${exitCode}. Both stdout and stderr were empty.`,
         });
       }

@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import type { RunAgentEvidence, RunAgentInput as AgentRunAgentInput } from '../agents/schemas.js';
+export { RunAgentEvidenceSchema as EvidenceItemSchema, RunAgentInputSchema } from '../agents/schemas.js';
 
 // ─── Persistence & budget constants ─────────────────────────────────────────
 
@@ -56,24 +57,5 @@ export interface CapturedRun {
 
 // ─── RunAgentInput Zod schema ───────────────────────────────────────────────
 
-export const EvidenceItemSchema = z.object({
-  id: z.string().max(EVIDENCE_ID_LIMIT),
-  type: z.literal('run_log'),
-  excerpt: z.string().max(EVIDENCE_EXCERPT_LIMIT),
-  relativePath: z.string().optional(),
-});
-
-export const RunAgentInputSchema = z.object({
-  runId: z.string().max(RUN_ID_LIMIT),
-  commandDisplay: z.string().max(COMMAND_DISPLAY_LIMIT),
-  exitCode: z.number().int().min(1).max(255),
-  stdout: z.string().max(STDOUT_CHAR_LIMIT),
-  stderr: z.string().max(STDERR_CHAR_LIMIT),
-  evidence: z
-    .array(EvidenceItemSchema)
-    .min(EVIDENCE_MIN_COUNT)
-    .max(EVIDENCE_MAX_COUNT),
-});
-
-export type RunAgentInput = z.infer<typeof RunAgentInputSchema>;
-export type EvidenceItem = z.infer<typeof EvidenceItemSchema>;
+export type RunAgentInput = AgentRunAgentInput;
+export type EvidenceItem = RunAgentEvidence;
