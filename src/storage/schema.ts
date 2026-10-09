@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const MIGRATIONS: Record<number, string> = {
   1: `
@@ -122,24 +122,112 @@ const MIGRATIONS: Record<number, string> = {
       SELECT RAISE(ABORT, 'run investigation project mismatch');
     END;
   `,
+  2: `
+    CREATE TABLE investigations_stage3 (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      trigger_run_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('investigating', 'awaiting_user', 'diagnosed', 'needs_input', 'awaiting_patch_approval', 'resolved', 'dismissed', 'failed')),
+      diagnosis TEXT,
+      model_version TEXT,
+      prompt_version TEXT,
+      last_error_code TEXT,
+      last_error_summary TEXT,
+      tool_round_count INTEGER NOT NULL DEFAULT 0 CHECK (tool_round_count >= 0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (project_id, id),
+      UNIQUE (project_id, trigger_run_id),
+      FOREIGN KEY (trigger_run_id, project_id) REFERENCES runs(id, project_id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+    );
+    INSERT INTO investigations_stage3
+      (id, project_id, trigger_run_id, status, diagnosis, model_version, prompt_version, last_error_code, last_error_summary, tool_round_count, created_at, updated_at)
+    SELECT id, project_id, trigger_run_id, status, diagnosis, model_version, prompt_version, NULL, NULL, 0, created_at, updated_at
+    FROM investigations;
+    DROP TRIGGER IF EXISTS runs_investigation_project_insert;
+    DROP TRIGGER IF EXISTS runs_investigation_project_update;
+    DROP TABLE investigations;
+    ALTER TABLE investigations_stage3 RENAME TO investigations;
+
+    CREATE TRIGGER runs_investigation_project_insert
+    BEFORE INSERT ON runs
+    FOR EACH ROW
+    WHEN NEW.investigation_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM investigations i WHERE i.id = NEW.investigation_id AND i.project_id = NEW.project_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'run investigation project mismatch');
+    END;
+
+    CREATE TRIGGER runs_investigation_project_update
+    BEFORE UPDATE OF investigation_id, project_id ON runs
+    FOR EACH ROW
+    WHEN NEW.investigation_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM investigations i WHERE i.id = NEW.investigation_id AND i.project_id = NEW.project_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'run investigation project mismatch');
+    END;
+
+    CREATE TABLE investigation_tool_calls_stage3 (
+      id TEXT PRIMARY KEY,
+      investigation_id TEXT NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
+      round INTEGER NOT NULL CHECK (round >= 0),
+      tool_name TEXT NOT NULL CHECK (tool_name IN ('getRecentLogs', 'searchLogs', 'getProjectContext', 'invalid')),
+      request_hash TEXT NOT NULL,
+      request_json TEXT NOT NULL DEFAULT '{}',
+      outcome_status TEXT NOT NULL CHECK (outcome_status IN ('pending', 'ok', 'empty', 'limited', 'unavailable', 'error')),
+      safe_summary TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (investigation_id, request_hash)
+    );
+    INSERT INTO investigation_tool_calls_stage3
+      (id, investigation_id, round, tool_name, request_hash, request_json, outcome_status, safe_summary, created_at)
+    SELECT id, investigation_id, round, tool_name, request_hash, '{}', outcome_status, safe_summary, created_at
+    FROM investigation_tool_calls;
+    DROP TABLE investigation_tool_calls;
+    ALTER TABLE investigation_tool_calls_stage3 RENAME TO investigation_tool_calls;
+
+    CREATE INDEX IF NOT EXISTS idx_investigations_project_updated ON investigations(project_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_investigation_round ON investigation_tool_calls(investigation_id, round);
+
+    CREATE TRIGGER investigations_updated_at
+    AFTER UPDATE OF status, diagnosis, model_version, prompt_version, last_error_code, last_error_summary, tool_round_count ON investigations
+    FOR EACH ROW
+    WHEN NEW.updated_at = OLD.updated_at
+    BEGIN
+      UPDATE investigations SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = NEW.id;
+    END;
+  `,
 };
 
-export function migrateDatabase(database: DatabaseSync): void {
+export function migrateDatabase(database: DatabaseSync, targetVersion = SCHEMA_VERSION): void {
   const row = database.prepare("PRAGMA user_version").get() as { user_version: number };
+  if (targetVersion > SCHEMA_VERSION || targetVersion < row.user_version) {
+    throw new Error(`Database schema ${targetVersion} is not a supported migration target`);
+  }
   if (row.user_version > SCHEMA_VERSION) {
     throw new Error(`Database schema ${row.user_version} is newer than supported schema ${SCHEMA_VERSION}`);
   }
-  for (let version = row.user_version + 1; version <= SCHEMA_VERSION; version += 1) {
+  for (let version = row.user_version + 1; version <= targetVersion; version += 1) {
     const migration = MIGRATIONS[version];
     if (!migration) throw new Error(`Missing database migration ${version}`);
-    database.exec("BEGIN IMMEDIATE");
+    const foreignKeysDisabled = version === 2;
+    if (foreignKeysDisabled) database.exec("PRAGMA foreign_keys = OFF");
+    let inTransaction = false;
     try {
+      database.exec("BEGIN IMMEDIATE");
+      inTransaction = true;
       database.exec(migration);
       database.exec(`PRAGMA user_version = ${version}`);
       database.exec("COMMIT");
+      inTransaction = false;
     } catch (error) {
-      database.exec("ROLLBACK");
+      if (inTransaction) database.exec("ROLLBACK");
       throw error;
+    } finally {
+      if (foreignKeysDisabled) database.exec("PRAGMA foreign_keys = ON");
     }
+  }
+  if (database.prepare("PRAGMA foreign_key_check").all().length > 0) {
+    throw new Error("Database migration left foreign-key violations");
   }
 }

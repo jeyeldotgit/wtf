@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { ToolRequestSchema, type RunAgentEvidence, type ToolRequest } from "../agents/schemas.js";
-import { recordToolCall, type ToolOutcomeStatus } from "../storage/repositories/tool-calls.js";
+import { recordToolCall } from "../storage/repositories/tool-calls.js";
 import { persistEvidence } from "../storage/repositories/evidence.js";
 import { handleGetProjectContext } from "./tool-handlers/get-project-context.js";
 import { handleGetRecentLogs } from "./tool-handlers/get-recent-logs.js";
@@ -17,8 +17,9 @@ export type DispatchContext = {
 };
 
 export type DispatchResult = BoundedHandlerResult & { accepted: boolean };
+export type DispatchOptions = { persist?: boolean };
 
-export async function dispatchToolRequest(rawRequest: unknown, context: DispatchContext): Promise<DispatchResult> {
+export async function dispatchToolRequest(rawRequest: unknown, context: DispatchContext, options: DispatchOptions = {}): Promise<DispatchResult> {
   const parsed = ToolRequestSchema.safeParse(rawRequest);
   if (!parsed.success) {
     const invalid = emptyToolResult(
@@ -27,19 +28,21 @@ export async function dispatchToolRequest(rawRequest: unknown, context: Dispatch
       "error",
       "The requested tool or its arguments were invalid; no lookup was performed.",
     );
-    try {
-      recordToolCall(context.database, {
-        investigationId: context.investigationId,
-        round: context.round,
-        toolName: "invalid",
-        request: rawRequest,
-        outcomeStatus: "error",
-        safeSummary: invalid.safeSummary,
-      });
-    } catch {
-      // Invalid requests still produce a bounded result when local audit storage is unavailable.
+    if (options.persist !== false) {
+      try {
+        recordToolCall(context.database, {
+          investigationId: context.investigationId,
+          round: context.round,
+          toolName: "invalid",
+          request: rawRequest,
+          outcomeStatus: "error",
+          safeSummary: invalid.safeSummary,
+        });
+      } catch {
+        // Invalid requests still produce a bounded result when local audit storage is unavailable.
+      }
+      persistSafely(context, invalid.evidence);
     }
-    persistSafely(context, invalid.evidence);
     return { ...invalid, accepted: false };
   }
 
@@ -56,19 +59,22 @@ export async function dispatchToolRequest(rawRequest: unknown, context: Dispatch
     );
   }
 
-  try {
-    recordToolCall(context.database, {
-      investigationId: context.investigationId,
-      round: context.round,
-      toolName: request.toolName,
-      request,
-      outcomeStatus: result.outcomeStatus as ToolOutcomeStatus,
-      safeSummary: result.safeSummary,
-    });
-  } catch {
-    // A failed audit write must not leak database details into the agent response.
+  if (options.persist !== false) {
+    try {
+      recordToolCall(context.database, {
+        investigationId: context.investigationId,
+        round: context.round,
+        toolName: request.toolName,
+        request,
+        outcomeStatus: result.outcomeStatus,
+        safeSummary: result.safeSummary,
+        localRoots: [context.projectRoot],
+      });
+    } catch {
+      // A failed audit write must not leak database details into the agent response.
+    }
+    persistSafely(context, result.evidence);
   }
-  persistSafely(context, result.evidence);
   return { ...result, accepted: true };
 }
 

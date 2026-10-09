@@ -1,6 +1,6 @@
 # Build stage 3: bounded investigation loop
 
-**Status:** Planned
+**Status:** Implemented; CLI integration remains pending
 
 **Prerequisite:** [Build stage 2: local storage and bounded tools](build-stage-2-storage-and-tools.md)
 
