@@ -1,0 +1,36 @@
+{
+  "name": "wtf-local",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first terminal debugging assistant that explains errors and proposes approved fixes.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "wtf": "./dist/run.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/run.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/run.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.91",
+    "@inkjs/ui": "^2.0.0",
+    "ai": "^7.0.127",
+    "ink": "^7.1.1",
+    "react": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
