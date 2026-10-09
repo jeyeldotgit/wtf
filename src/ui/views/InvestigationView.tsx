@@ -29,19 +29,29 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
 
   const isInteractive = Boolean(process.stdin.isTTY);
 
-  // Allow switching test scenarios using keys 1, 2, 3
+  // Allow switching test scenarios using keys 1-9, 0 (for 10), or left/right arrow keys
+  // Only active when not currently typing in QuestionModal
   useInput(
-    (input) => {
-      const num = parseInt(input, 10);
-      if (num >= 1 && num <= testScenarios.length) {
-        const nextIdx = num - 1;
-        setActiveScenarioIdx(nextIdx);
-        setData(testScenarios[nextIdx].data);
+    (input, key) => {
+      let targetIdx: number | null = null;
+      if (input >= '1' && input <= '9') {
+        targetIdx = parseInt(input, 10) - 1;
+      } else if (input === '0' && testScenarios.length >= 10) {
+        targetIdx = 9; // '0' key selects scenario 10
+      } else if (key.rightArrow || key.downArrow) {
+        targetIdx = (activeScenarioIdx + 1) % testScenarios.length;
+      } else if (key.leftArrow || key.upArrow) {
+        targetIdx = (activeScenarioIdx - 1 + testScenarios.length) % testScenarios.length;
+      }
+
+      if (targetIdx !== null && targetIdx >= 0 && targetIdx < testScenarios.length) {
+        setActiveScenarioIdx(targetIdx);
+        setData(testScenarios[targetIdx].data);
         setVerificationOutput([]);
         setUserQuestionResponse(null);
       }
     },
-    { isActive: isInteractive }
+    { isActive: isInteractive && data.state !== 'asking_question' }
   );
 
   const handleApprovePatch = () => {
@@ -115,21 +125,24 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
     <Box flexDirection="column" padding={1}>
       {/* Test Scenario Switcher Toolbar */}
       <Box
-        justifyContent="space-between"
+        flexDirection="column"
         borderStyle="single"
         borderColor="gray"
         paddingX={1}
         marginBottom={1}
       >
-        <Text bold color="cyan">🧪 TEST SCENARIOS (Press 1, 2, or 3 to switch):</Text>
-        <Box>
+        <Box justifyContent="space-between">
+          <Text bold color="cyan">🧪 TEST SCENARIOS (Press 1-9, 0 or ← / → arrows):</Text>
+          <Text color="yellow">Active: [{activeScenarioIdx + 1}/10] {testScenarios[activeScenarioIdx].title}</Text>
+        </Box>
+        <Box flexWrap="wrap" marginTop={1}>
           {testScenarios.map((sc, idx) => (
-            <Box key={sc.id} marginLeft={1}>
+            <Box key={sc.id} marginRight={1}>
               <Text
                 bold={idx === activeScenarioIdx}
                 color={idx === activeScenarioIdx ? 'yellow' : 'gray'}
               >
-                [{idx + 1}] {sc.id}
+                [{idx === 9 ? '0' : idx + 1}] {sc.id}
               </Text>
             </Box>
           ))}

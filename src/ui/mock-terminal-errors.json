@@ -1,0 +1,366 @@
+[
+  {
+    "id": "port-already-in-use",
+    "title": "Port Already In Use (EADDRINUSE)",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "pnpm run dev",
+        "exitCode": 1,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/web",
+        "errorSummary": "Error: listen EADDRINUSE: address already in use :::3000",
+        "rawLogLines": [
+          "> web@1.0.0 dev /app/web",
+          "> next dev -p 3000",
+          "",
+          "node:events:498",
+          "      throw er; // Unhandled 'error' event",
+          "      ^",
+          "Error: listen EADDRINUSE: address already in use :::3000",
+          "    at Server.setupListenHandle [as _listen2] (node:net:1904:16)",
+          "    at listenInCluster (node:net:1961:12)",
+          "    at Server.listen (node:net:2063:7)"
+        ]
+      },
+      "fix": {
+        "filePath": "package.json",
+        "description": "Configure the dev script to fallback to port 3001 or kill the stale process occupying port 3000",
+        "conceptExplanation": [
+          "EADDRINUSE occurs when another active process (or a previous unkilled zombie process) is already bound to that TCP port.",
+          "You can either kill the process holding port 3000 or pass a distinct port flag to your dev server."
+        ],
+        "whyFixWorks": "Changes the dev command to bind to port 3001 to bypass the port collision immediately.",
+        "confidence": "high",
+        "diff": "--- a/package.json\n+++ b/package.json\n@@ -7,3 +7,3 @@\n   \"scripts\": {\n-    \"dev\": \"next dev -p 3000\",\n+    \"dev\": \"next dev -p 3001\",\n     \"build\": \"next build\""
+      },
+      "verification": {
+        "command": "pnpm run dev",
+        "description": "Start the development server on the new port to verify startup succeeds."
+      }
+    }
+  },
+  {
+    "id": "docker-daemon-not-running",
+    "title": "Docker Daemon Not Running",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "docker compose up -d",
+        "exitCode": 1,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/infra",
+        "errorSummary": "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+        "rawLogLines": [
+          "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+          "exit status 1"
+        ]
+      },
+      "fix": {
+        "filePath": "/etc/systemd/system/docker.service",
+        "description": "Start the system Docker daemon service",
+        "conceptExplanation": [
+          "The Docker CLI communicates with dockerd through a Unix domain socket.",
+          "When the Docker service is inactive or not started on boot, commands fail to establish socket connection."
+        ],
+        "whyFixWorks": "Starts the Docker daemon via systemctl so the client can communicate over the unix socket.",
+        "confidence": "high",
+        "diff": "--- a/command\n+++ b/command\n@@ -1 +1 @@\n-docker compose up -d\n+sudo systemctl start docker && docker compose up -d"
+      },
+      "verification": {
+        "command": "docker info",
+        "description": "Check Docker daemon status and connectivity."
+      }
+    }
+  },
+  {
+    "id": "git-detached-head-push-rejected",
+    "title": "Git Push Non-Fast-Forward (Rejected)",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "git push origin main",
+        "exitCode": 1,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/repo",
+        "errorSummary": "Updates were rejected because the remote contains work that you do not have locally.",
+        "rawLogLines": [
+          "To https://github.com/org/repo.git",
+          " ! [rejected]        main -> main (non-fast-forward)",
+          "error: failed to push some refs to 'https://github.com/org/repo.git'",
+          "hint: Updates were rejected because the remote contains work that you do not",
+          "hint: have locally. This is usually caused by another repository pushing to",
+          "hint: the same ref. You may want to first integrate the remote changes",
+          "hint: (e.g., 'git pull ...') before pushing again."
+        ]
+      },
+      "fix": {
+        "filePath": ".git/config",
+        "description": "Rebase local commits on top of the latest upstream remote branch changes",
+        "conceptExplanation": [
+          "Git protects remote history from being overwritten when your local branch diverges from the upstream branch.",
+          "Pulling with rebase integrates remote commits first, cleanly applying local commits on top."
+        ],
+        "whyFixWorks": "Resolves divergence without creating superfluous merge commits.",
+        "confidence": "high",
+        "diff": "--- a/workflow\n+++ b/workflow\n@@ -1 +1 @@\n-git push origin main\n+git pull --rebase origin main && git push origin main"
+      },
+      "verification": {
+        "command": "git pull --rebase origin main",
+        "description": "Fetch upstream refs and replay commits on top cleanly."
+      }
+    }
+  },
+  {
+    "id": "python-module-not-found",
+    "title": "Python ModuleNotFoundError",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "python3 main.py",
+        "exitCode": 1,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/service",
+        "errorSummary": "ModuleNotFoundError: No module named 'pydantic'",
+        "rawLogLines": [
+          "Traceback (most recent call last):",
+          "  File \"/app/service/main.py\", line 4, in <module>",
+          "    from pydantic import BaseModel, Field",
+          "ModuleNotFoundError: No module named 'pydantic'"
+        ]
+      },
+      "fix": {
+        "filePath": "requirements.txt",
+        "description": "Add pydantic to requirements.txt and install missing package into virtual environment",
+        "conceptExplanation": [
+          "Python scripts require third-party libraries to be installed in the active environment/site-packages.",
+          "Declaring explicit package pins in requirements.txt guarantees consistent reproducibility."
+        ],
+        "whyFixWorks": "Ensures the pydantic module is installed and discoverable by the Python interpreter.",
+        "confidence": "high",
+        "diff": "--- a/requirements.txt\n+++ b/requirements.txt\n@@ -3,2 +3,3 @@\n fastapi>=0.110.0\n uvicorn>=0.28.0\n+pydantic>=2.6.0"
+      },
+      "verification": {
+        "command": "pip install -r requirements.txt && python3 main.py --help",
+        "description": "Install dependencies and execute the script help flag."
+      }
+    }
+  },
+  {
+    "id": "permission-denied-exec",
+    "title": "Bash Script Permission Denied (EACCES)",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "./scripts/deploy.sh",
+        "exitCode": 126,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/project",
+        "errorSummary": "bash: ./scripts/deploy.sh: Permission denied",
+        "rawLogLines": [
+          "bash: ./scripts/deploy.sh: Permission denied"
+        ]
+      },
+      "fix": {
+        "filePath": "scripts/deploy.sh",
+        "description": "Grant execute permission (+x) to the deploy shell script",
+        "conceptExplanation": [
+          "POSIX filesystems require the execute bit (x) set on executable scripts when running them directly.",
+          "New files or checked-out files often lack executable mode flags by default."
+        ],
+        "whyFixWorks": "Adds executable rights using chmod +x so the shell can directly run the file.",
+        "confidence": "high",
+        "diff": "--- a/permissions\n+++ b/permissions\n@@ -1 +1 @@\n--rw-r--r-- deploy.sh\n+-rwxr-xr-x deploy.sh"
+      },
+      "verification": {
+        "command": "chmod +x ./scripts/deploy.sh && ./scripts/deploy.sh --dry-run",
+        "description": "Add executable permission and run in dry-run mode."
+      }
+    }
+  },
+  {
+    "id": "rust-borrow-checker-error",
+    "title": "Rust Borrow Checker (E0382 Use of Moved Value)",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "cargo build",
+        "exitCode": 101,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/rust-cli",
+        "errorSummary": "error[E0382]: use of moved value: `buffer`",
+        "rawLogLines": [
+          "error[E0382]: use of moved value: `buffer`",
+          "  --> src/main.rs:18:28",
+          "   |",
+          "16 |     let buffer = String::from(\"payload\");",
+          "17 |     process_buffer(buffer);",
+          "   |                    ------ value moved here",
+          "18 |     println!(\"{}\", buffer);",
+          "   |                    ^^^^^^ value borrowed here after move",
+          "   |",
+          "   = note: consider cloning or borrowing"
+        ]
+      },
+      "fix": {
+        "filePath": "src/main.rs",
+        "description": "Pass a reference (&buffer) or clone the string before passing to process_buffer",
+        "conceptExplanation": [
+          "Rust enforces strict ownership; passing a non-Copy type by value transfers ownership away.",
+          "Using a shared reference `&buffer` allows downstream functions to read without consuming the instance."
+        ],
+        "whyFixWorks": "Borrows the String instead of taking full ownership, keeping `buffer` valid for the subsequent println! call.",
+        "confidence": "high",
+        "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -17,2 +17,2 @@\n-    process_buffer(buffer);\n+    process_buffer(&buffer);\n     println!(\"{}\", buffer);"
+      },
+      "verification": {
+        "command": "cargo check",
+        "description": "Run compiler checks without building artifacts to confirm ownership passes."
+      }
+    }
+  },
+  {
+    "id": "postgres-connection-refused",
+    "title": "PostgreSQL Connection Refused (ECONNREFUSED)",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "pnpm run db:migrate",
+        "exitCode": 1,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/backend",
+        "errorSummary": "PrismaClientInitializationError: Can't reach database server at localhost:5432",
+        "rawLogLines": [
+          "PrismaClientInitializationError: Can't reach database server at `localhost:5432`",
+          "Please make sure your database server is running at `localhost:5432`.",
+          "    at Object.request (/app/node_modules/.prisma/client/runtime/library.js:122:15)",
+          "    at async main (/app/src/db/migrate.ts:9:5)"
+        ]
+      },
+      "fix": {
+        "filePath": ".env",
+        "description": "Correct DATABASE_URL host from localhost to 127.0.0.1 or start local postgres service",
+        "conceptExplanation": [
+          "Node.js DNS resolution may resolve 'localhost' to IPv6 (::1) where PostgreSQL is only listening on IPv4 (127.0.0.1).",
+          "Specifying the explicit IPv4 loopback avoids connection refusal when dual-stack bindings differ."
+        ],
+        "whyFixWorks": "Directly targets IPv4 loopback address 127.0.0.1 where the database engine is bound.",
+        "confidence": "high",
+        "diff": "--- a/.env\n+++ b/.env\n@@ -1 +1 @@\n-DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/mydb\"\n+DATABASE_URL=\"postgresql://postgres:postgres@127.0.0.1:5432/mydb\""
+      },
+      "verification": {
+        "command": "pnpm run db:migrate",
+        "description": "Run migrations against explicit database host."
+      }
+    }
+  },
+  {
+    "id": "go-missing-go-sum-entry",
+    "title": "Go Missing go.sum Entry",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "go run ./cmd/api",
+        "exitCode": 1,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/go-service",
+        "errorSummary": "missing go.sum entry for module providing package github.com/gin-gonic/gin",
+        "rawLogLines": [
+          "cmd/api/main.go:5:2: missing go.sum entry for module providing package github.com/gin-gonic/gin (imported by github.com/app/go-service/cmd/api);",
+          "to add:",
+          "\tgo mod download github.com/gin-gonic/gin"
+        ]
+      },
+      "fix": {
+        "filePath": "go.mod",
+        "description": "Tidy dependencies and record missing checksums in go.sum",
+        "conceptExplanation": [
+          "Go modules enforce cryptographic checksum verification recorded in `go.sum`.",
+          "When imports are introduced without updating checksums, the compiler refuses to build."
+        ],
+        "whyFixWorks": "Runs `go mod tidy` to prune unused packages and record hashes for all imported dependencies.",
+        "confidence": "high",
+        "diff": "--- a/workflow\n+++ b/workflow\n@@ -1 +1 @@\n-go run ./cmd/api\n+go mod tidy && go run ./cmd/api"
+      },
+      "verification": {
+        "command": "go mod tidy && go test ./...",
+        "description": "Ensure module checksums are synchronized and package tests pass."
+      }
+    }
+  },
+  {
+    "id": "node-out-of-memory",
+    "title": "Node.js Heap Out of Memory (OOM)",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "pnpm run build",
+        "exitCode": 134,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/frontend",
+        "errorSummary": "FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory",
+        "rawLogLines": [
+          "<--- Last few GCs --->",
+          "[42109:0x6b45a20]    42010 ms: Mark-Compact (reduce) 4082.4 (4138.8) -> 4081.2 (4138.8) MB",
+          "[42109:0x6b45a20]    42650 ms: Mark-Compact (reduce) 4081.2 (4138.8) -> 4080.9 (4138.8) MB",
+          "<--- JS stacktrace --->",
+          "FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory",
+          " 1: 0xb9e480 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [node]"
+        ]
+      },
+      "fix": {
+        "filePath": "package.json",
+        "description": "Increase maximum old space memory limit via NODE_OPTIONS flag",
+        "conceptExplanation": [
+          "Node.js enforces a default heap memory ceiling (~2GB to ~4GB depending on architecture).",
+          "Large bundle generation or type-checking can temporarily exceed the default heap limit."
+        ],
+        "whyFixWorks": "Allocates 8192 MB (8GB) heap ceiling to accommodate the compilation phase without crashing.",
+        "confidence": "high",
+        "diff": "--- a/package.json\n+++ b/package.json\n@@ -6,3 +6,3 @@\n   \"scripts\": {\n-    \"build\": \"webpack --mode production\",\n+    \"build\": \"NODE_OPTIONS=--max-old-space-size=8192 webpack --mode production\","
+      },
+      "verification": {
+        "command": "pnpm run build",
+        "description": "Execute build script with the increased heap allocation."
+      }
+    }
+  },
+  {
+    "id": "kubernetes-image-pull-backoff",
+    "title": "Kubectl Manifest Apply (ErrImagePull / ImagePullBackOff)",
+    "data": {
+      "state": "diagnosis_ready",
+      "failure": {
+        "command": "kubectl apply -f deployment.yaml",
+        "exitCode": 1,
+        "timestamp": "2026-10-09T13:10:00.000Z",
+        "cwd": "/app/k8s",
+        "errorSummary": "Failed to pull image 'registry.internal/api:latest': rpc error: code = NotFound desc = failed to pull and unpack image",
+        "rawLogLines": [
+          "deployment.apps/api-service created",
+          "Events:",
+          "  Warning  Failed     3s (x2 over 15s)  kubelet  Failed to pull image \"registry.internal/api:latest\": rpc error: code = NotFound",
+          "  Warning  Failed     3s (x2 over 15s)  kubelet  Error: ErrImagePull",
+          "  Normal   BackOff    1s (x3 over 14s)  kubelet  Back-off pulling image \"registry.internal/api:latest\"",
+          "  Warning  Failed     1s (x3 over 14s)  kubelet  Error: ImagePullBackOff"
+        ]
+      },
+      "fix": {
+        "filePath": "deployment.yaml",
+        "description": "Fix invalid container image tag and specify existing semver tag",
+        "conceptExplanation": [
+          "ImagePullBackOff indicates the kubelet cannot download the target container image from the registry.",
+          "Using untagged or non-existent ':latest' tags in private registries fails authentication or image lookup."
+        ],
+        "whyFixWorks": "Points the pod spec to a verified, published image version tag in the container registry.",
+        "confidence": "high",
+        "diff": "--- a/deployment.yaml\n+++ b/deployment.yaml\n@@ -18,3 +18,3 @@\n     spec:\n       containers:\n-      - image: registry.internal/api:latest\n+      - image: registry.internal/api:v1.4.2"
+      },
+      "verification": {
+        "command": "kubectl rollout status deployment/api-service --timeout=60s",
+        "description": "Verify the pods transition successfully to Running state."
+      }
+    }
+  }
+]
+
