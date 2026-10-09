@@ -5,7 +5,7 @@
   "description": "A local-first terminal debugging assistant that explains errors and proposes approved fixes.",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.5.0"
   },
   "bin": {
     "wtf": "./dist/run.js"
@@ -18,7 +18,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/run.js",
     "typecheck": "tsc --noEmit -p tsconfig.eval.json",
-    "test": "node --import tsx --test tests/agents/agent-contract.test.ts && vitest run src/context/__tests__",
+    "test": "node --import tsx --test tests/agents/agent-contract.test.ts tests/stage2/storage-tools.test.ts && vitest run src/context/__tests__",
     "test:watch": "vitest src/context/__tests__",
     "eval:agent": "tsx evals/run-agent.eval.ts",
     "eval:dataset:create": "tsx evals/sync-laminar-dataset.ts create",
