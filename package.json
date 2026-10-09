@@ -17,17 +17,24 @@
     "dev": "tsx watch src/run.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/run.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.eval.json",
+    "test": "node --import tsx --test tests/agents/agent-contract.test.ts",
+    "eval:agent": "tsx evals/run-agent.eval.ts",
+    "eval:dataset:create": "tsx evals/sync-laminar-dataset.ts create",
+    "eval:dataset:push": "tsx evals/sync-laminar-dataset.ts push"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.91",
     "@inkjs/ui": "^2.0.0",
     "ai": "^7.0.127",
+    "ai-sdk-ollama": "^4.4.0",
     "ink": "^7.1.1",
+    "ollama-ai-provider-v2": "^4.0.1",
     "react": "^19.3.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@lmnr-ai/lmnr": "^0.8.49",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "tsx": "^4.23.15",
