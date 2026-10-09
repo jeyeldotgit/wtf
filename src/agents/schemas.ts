@@ -6,11 +6,12 @@ export const MAX_RUN_AGENT_EVIDENCE_EXCERPT_CHARS = 4_000;
 export const MAX_RUN_AGENT_EVIDENCE_COUNT = 30;
 
 export function isSafeProjectRelativePath(value: string): boolean {
-  if (!value || value.length > 240 || /[\u0000-\u001f\u007f]/.test(value)) return false;
+  if (!value || value.length > 240 || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069:<>"|?*]/.test(value)) return false;
   if (value.startsWith("/") || value.startsWith("\\") || /^[a-zA-Z]:/.test(value)) return false;
 
   const parts = value.replaceAll("\\", "/").split("/");
   if (parts.some((part) => !part || part === "." || part === "..")) return false;
+  if (parts.some(part => /[. ]$/.test(part) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) return false;
   const lowerParts = parts.map((part) => part.toLowerCase());
   if (lowerParts.some((part) => [".git", "node_modules", "dist", "build", "coverage", ".next", ".turbo", ".cache", "target", "out"].includes(part))) return false;
   if (parts.some((part) => /^\.env(?:\.|$)/i.test(part))) return false;

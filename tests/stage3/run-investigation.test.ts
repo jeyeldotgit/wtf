@@ -543,7 +543,7 @@ describe("bounded investigation loop", () => {
       const version = database.prepare("PRAGMA user_version").get() as { user_version: number };
       const investigation = database.prepare("SELECT status, last_error_code, tool_round_count FROM investigations WHERE id = 'legacy-investigation'").get() as Record<string, string | number | null>;
       const call = database.prepare("SELECT request_json, outcome_status FROM investigation_tool_calls WHERE id = 'legacy-call'").get() as Record<string, string>;
-      assert.equal(version.user_version, 3);
+      assert.equal(version.user_version, 4);
       assert.equal(investigation.status, "investigating");
       assert.equal(investigation.last_error_code, null);
       assert.equal(investigation.tool_round_count, 0);

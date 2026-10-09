@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const MIGRATIONS: Record<number, string> = {
   1: `
@@ -198,6 +198,19 @@ const MIGRATIONS: Record<number, string> = {
     END;
   `,
   3: `ALTER TABLE runs ADD COLUMN termination_signal TEXT;`,
+  4: `
+    ALTER TABLE fix_proposals ADD COLUMN content_hash TEXT;
+    ALTER TABLE fix_proposals ADD COLUMN snapshots_json TEXT;
+    ALTER TABLE fix_proposals ADD COLUMN applied_snapshots_json TEXT;
+    ALTER TABLE fix_proposals ADD COLUMN decision_at TEXT;
+    ALTER TABLE fix_proposals ADD COLUMN error_summary TEXT;
+    ALTER TABLE command_proposals ADD COLUMN content_hash TEXT;
+    ALTER TABLE command_proposals ADD COLUMN decision_at TEXT;
+    ALTER TABLE command_proposals ADD COLUMN run_id TEXT REFERENCES runs(id);
+    ALTER TABLE command_proposals ADD COLUMN error_summary TEXT;
+    CREATE INDEX idx_fix_review ON fix_proposals(investigation_id, created_at) WHERE content_hash IS NOT NULL;
+    CREATE INDEX idx_command_review ON command_proposals(investigation_id, created_at) WHERE content_hash IS NOT NULL;
+  `,
 };
 
 export function migrateDatabase(database: DatabaseSync, targetVersion = SCHEMA_VERSION): void {

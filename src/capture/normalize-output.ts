@@ -132,8 +132,8 @@ export function normalizeOutput(run: CapturedRun): CapturedRun {
       stdout: cleanText(run.stdout),
       stderr: cleanText(run.stderr),
       truncation: {
-        stdoutTruncated: false,
-        stderrTruncated: false,
+        stdoutTruncated: run.truncation.stdoutTruncated,
+        stderrTruncated: run.truncation.stderrTruncated,
       },
     };
   }
@@ -166,8 +166,8 @@ export function normalizeOutput(run: CapturedRun): CapturedRun {
     stdout: cleanText(stdoutResult.text),
     stderr: cleanText(stderrResult.text),
     truncation: {
-      stdoutTruncated: stdoutResult.truncated,
-      stderrTruncated: stderrResult.truncated,
+      stdoutTruncated: stdoutResult.truncated || run.truncation.stdoutTruncated,
+      stderrTruncated: stderrResult.truncated || run.truncation.stderrTruncated,
     },
   };
 }

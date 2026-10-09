@@ -6,6 +6,9 @@ import {
 } from "../../agents/schemas.js";
 import type { InvestigationRecord } from "../../storage/repositories/investigations.js";
 import type { RunRecord } from "../../storage/repositories/runs.js";
+import { sanitizeTerminalText, sanitizeDiffText } from '../../shared/terminal-text.js';
+import type { ReviewProposals } from '../../storage/repositories/review-proposals.js';
+export { sanitizeTerminalText } from '../../shared/terminal-text.js';
 
 export type RunSummary = Pick<RunRecord,
   "id" | "commandDisplay" | "exitCode" | "status" | "startTime" | "stdoutBytes" | "stderrBytes"
@@ -13,16 +16,18 @@ export type RunSummary = Pick<RunRecord,
 
 export type InvestigationViewModel = {
   run: RunSummary;
+  investigationId: string;
   status: InvestigationRecord["status"];
   diagnosis: Diagnosis | null;
   evidence: RunAgentEvidence[];
   errorSummary: string | null;
+  proposals: ReviewProposals;
 };
 
 export function buildRunSummary(run: RunRecord): RunSummary {
   return {
     id: run.id,
-    commandDisplay: sanitizeTerminalText(run.commandDisplay),
+    commandDisplay: sanitizeTerminalText(run.commandDisplay, [run.cwd]),
     exitCode: run.exitCode,
     status: run.status,
     startTime: run.startTime,
@@ -35,74 +40,72 @@ export function buildInvestigationViewModel(
   run: RunRecord,
   investigation: InvestigationRecord,
   rawEvidence: unknown[],
+  proposals: ReviewProposals = {},
 ): InvestigationViewModel {
   if (run.id !== investigation.triggerRunId || run.projectId !== investigation.projectId) {
     throw new Error("Investigation and run records do not match");
   }
   const evidence = rawEvidence.map((raw) => {
     const item = RunAgentEvidenceSchema.parse(raw);
-    return { ...item, excerpt: sanitizeTerminalText(item.excerpt) };
+    return { ...item, id: sanitizeTerminalText(item.id), excerpt: sanitizeTerminalText(item.excerpt, [run.cwd]) };
   });
-  const diagnosis = investigation.diagnosis
-    ? sanitizeDiagnosis(DiagnosisSchema.parse(JSON.parse(investigation.diagnosis)))
+  const diagnosis = investigation.diagnosis && investigation.status !== 'failed'
+    ? sanitizeDiagnosis(DiagnosisSchema.parse(JSON.parse(investigation.diagnosis)), [run.cwd])
     : null;
   if (diagnosis) validateEvidenceReferences(diagnosis, evidence);
 
   return {
     run: buildRunSummary(run),
-    status: investigation.status,
+    investigationId: investigation.id,
+    status: diagnosis?.missingInformation.length ? 'needs_input' : investigation.status,
     diagnosis,
     evidence,
+    proposals: diagnosis && !diagnosis.missingInformation.length && ['diagnosed', 'awaiting_patch_approval'].includes(investigation.status) ? proposals : {},
     errorSummary: investigation.lastErrorSummary === null
       ? null
-      : sanitizeTerminalText(investigation.lastErrorSummary),
+      : sanitizeTerminalText(investigation.lastErrorSummary, [run.cwd]),
   };
 }
 
-export function sanitizeTerminalText(value: string): string {
-  return value
-    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001b[@-_]/g, "")
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
-    .replace(/\r\n?/g, "\n");
-}
-
-function sanitizeDiagnosis(diagnosis: Diagnosis): Diagnosis {
+function sanitizeDiagnosis(diagnosis: Diagnosis, roots: string[]): Diagnosis {
+  const safe = (value: string) => sanitizeTerminalText(value, roots);
   return {
     ...diagnosis,
-    summary: sanitizeTerminalText(diagnosis.summary),
+    summary: safe(diagnosis.summary),
     observations: diagnosis.observations.map((item) => ({
       ...item,
-      statement: sanitizeTerminalText(item.statement),
+      statement: safe(item.statement),
+      evidenceIds: item.evidenceIds.map(safe),
     })),
     likelyCause: diagnosis.likelyCause
       ? {
         ...diagnosis.likelyCause,
-        cause: sanitizeTerminalText(diagnosis.likelyCause.cause),
-        rationale: sanitizeTerminalText(diagnosis.likelyCause.rationale),
+        cause: safe(diagnosis.likelyCause.cause),
+        rationale: safe(diagnosis.likelyCause.rationale),
+        evidenceIds: diagnosis.likelyCause.evidenceIds.map(safe),
       }
       : undefined,
-    beginnerExplanation: diagnosis.beginnerExplanation.map(sanitizeTerminalText),
+    beginnerExplanation: diagnosis.beginnerExplanation.map(safe),
     proposedFix: diagnosis.proposedFix
       ? {
         ...diagnosis.proposedFix,
-        summary: sanitizeTerminalText(diagnosis.proposedFix.summary),
+        summary: safe(diagnosis.proposedFix.summary),
+        evidenceIds: diagnosis.proposedFix.evidenceIds.map(safe),
         files: diagnosis.proposedFix.files.map((file) => ({
           ...file,
-          path: sanitizeTerminalText(file.path),
-          diff: sanitizeTerminalText(file.diff),
+          path: safe(file.path),
+          diff: sanitizeDiffText(file.diff, roots),
         })),
       }
       : undefined,
     verificationCommand: diagnosis.verificationCommand
       ? {
         ...diagnosis.verificationCommand,
-        command: sanitizeTerminalText(diagnosis.verificationCommand.command),
-        reason: sanitizeTerminalText(diagnosis.verificationCommand.reason),
+        command: safe(diagnosis.verificationCommand.command),
+        reason: safe(diagnosis.verificationCommand.reason),
       }
       : undefined,
-    missingInformation: diagnosis.missingInformation.map(sanitizeTerminalText),
+    missingInformation: diagnosis.missingInformation.map(safe),
   };
 }
 
