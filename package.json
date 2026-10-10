@@ -14,7 +14,7 @@
     "dist"
   ],
   "scripts": {
-    "dev": "tsx watch src/run.ts",
+    "dev": "tsx src/run.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/run.js",
     "typecheck": "tsc --noEmit -p tsconfig.eval.json",
